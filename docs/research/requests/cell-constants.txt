@@ -1,0 +1,13 @@
+01453740 1 motion_constant
+014852b4 1 zero_candidate
+0145be38 1 arrival_constant
+0148512c 1 epsilon
+013ec494 1 normalization_epsilon
+013eb950 1 slow_distance
+013eb1bc 1 damping
+01481754 1 keyboard_target_distance
+015a7c1c 12 angles_basis_vectors
+016b3c28 3 default_vector
+01483b54 154 progress_table
+0140f408 1 npc_rescan_random
+013eb8a0 1 npc_rescan_base

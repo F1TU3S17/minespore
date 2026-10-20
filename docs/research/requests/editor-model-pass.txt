@@ -1,0 +1,11 @@
+004ae8d0 editor_model_load
+004af780 editor_model_save
+00574080 editor_history_capture_state
+0057c2f0 editor_history_restore_state
+0057af00 editor_placement_finalize_candidate
+00577520 editor_placement_cleanup_candidate
+00573c00 editor_part_release_candidate
+00573d70 editor_part_change_candidate
+0058ba60 editor_input_candidate
+00b1e000 mode_transition_names
+00e837c0 cell_curve_evaluation

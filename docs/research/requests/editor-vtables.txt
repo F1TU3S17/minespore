@@ -1,0 +1,3 @@
+013f56c0 15 editor_limits_vtable
+013f5800 24 editor_main_vtable
+015e4ef0 1 editor_global

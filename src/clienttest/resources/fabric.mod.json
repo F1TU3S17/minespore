@@ -1,0 +1,1 @@
+{"schemaVersion":1,"id":"sporecell_clienttest","version":"1.0.0","name":"Cell client tests","environment":"client","mixins":["sporecell-test.mixins.json"],"entrypoints":{"client":["dev.sporecell.client.EditorRenderTest","dev.sporecell.client.WorldRenderTest"]}}

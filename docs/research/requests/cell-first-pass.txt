@@ -1,0 +1,11 @@
+# Addresses from SDK disk-build column; hypotheses until verified against this executable.
+00e5b790 player_mouse_movement_candidate
+00e58980 damage_amount_candidate
+00e57460 attack_filter_candidate
+00e57340 scale_difference_candidate
+00e74a20 create_cell_candidate
+00e4ce20 globals_accessor_candidate
+00e58ef0 advection_by_progress_candidate
+00e58e30 next_advection_candidate
+00e57e90 chase_state_candidate_unverified_version
+00e6d200 animation_dispatch_candidate

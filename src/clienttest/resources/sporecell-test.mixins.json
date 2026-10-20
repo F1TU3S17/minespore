@@ -1,0 +1,1 @@
+{"required":true,"package":"dev.sporecell.test.mixin","compatibilityLevel":"JAVA_21","client":["CellRenderProbe"],"injectors":{"defaultRequire":1}}

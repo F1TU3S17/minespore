@@ -1,0 +1,12 @@
+.gradle/
+.gradle-home/
+build/
+run/
+.idea/
+*.iml
+tools/gradle-*/
+.rea-tmp/
+.analysis-project/
+.analysis-home/
+docs/research/evidence/
+research/ghidra/

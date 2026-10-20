@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "sporecell",
+  "version": "${version}",
+  "name": "Spore Cell",
+  "description": "A voxel cell stage in a separate Minecraft pond.",
+  "authors": ["Spore Cell contributors"],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {"main": ["dev.sporecell.SporeCell"], "client": ["dev.sporecell.client.CellClient"]},
+  "mixins": [{"config": "sporecell.client.mixins.json", "environment": "client"}],
+  "depends": {"fabricloader": ">=0.16.10", "minecraft": "1.21.1", "java": ">=21", "fabric-api": "*"}
+}

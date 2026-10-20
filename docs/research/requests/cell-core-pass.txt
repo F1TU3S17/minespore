@@ -1,0 +1,12 @@
+00e5b0a0 input_direction_smoothing
+00e7f3a0 cell_simulation_dispatch_candidate
+00e53ae0 frame_helper_candidate
+00e600a0 frame_helper_candidate
+00e6c9f0 frame_helper_candidate
+00e7a4a0 death_handler_candidate
+00e4ee40 player_scale_lookup
+00e82970 saved_mode_source
+00e5b790 player_mouse_movement_candidate
+00e5b2e0 player_keyboard_movement_candidate
+00e57340 scale_category
+00e7a7c0 damage_application_candidate

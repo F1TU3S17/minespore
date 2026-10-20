@@ -1,0 +1,1 @@
+{"required":true,"package":"dev.sporecell.client.mixin","refmap":"client-spore-cell-refmap.json","compatibilityLevel":"JAVA_21","client":["CameraMixin"],"injectors":{"defaultRequire":1}}

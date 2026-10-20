@@ -1,0 +1,12 @@
+00586410 editor_commit_history
+00586b00 editor_set_model
+0058a5a0 editor_undo
+0058a950 editor_redo
+00587270 editor_set_active_mode
+0058b650 editor_key_handler_candidate
+0046e920 editor_resource_text_export
+004bd190 editor_model_property_parse_candidate
+00e5f450 eating_attachment_start
+00e5f4d0 eating_timed_event_start
+00e679e0 cell_model_data_lookup
+00e72060 player_death

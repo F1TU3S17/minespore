@@ -1,0 +1,1 @@
+{"schemaVersion":1,"id":"sporecell_test","version":"1.0.0","name":"Cell integration tests","environment":"server","entrypoints":{"fabric-gametest":["dev.sporecell.CellIntegrationTest"]}}

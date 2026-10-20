@@ -1,0 +1,65 @@
+plugins {
+    id 'fabric-loom' version '1.9.2'
+    id 'maven-publish'
+}
+
+version = '0.1.0'
+group = 'dev.sporecell'
+base { archivesName = 'spore-cell' }
+repositories { mavenCentral() }
+dependencies {
+    minecraft 'com.mojang:minecraft:1.21.1'
+    mappings 'net.fabricmc:yarn:1.21.1+build.3:v2'
+    modImplementation 'net.fabricmc:fabric-loader:0.16.10'
+    modImplementation 'net.fabricmc.fabric-api:fabric-api:0.115.1+1.21.1'
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+}
+sourceSets {
+    clienttest {
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
+    gametest {
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
+}
+loom {
+    splitEnvironmentSourceSets()
+    mods {
+        sporecell { sourceSet sourceSets.main; sourceSet sourceSets.client }
+        sporecell_test { sourceSet sourceSets.gametest }
+        sporecell_clienttest { sourceSet sourceSets.clienttest }
+    }
+    runs {
+        worldTest {
+            client()
+            name 'Cell World Render Test'
+            runDir 'build/worldtest'
+            source sourceSets.clienttest
+            vmArg '-Dsporecell.test.world=true'
+            programArgs '--width', '1280', '--height', '720'
+        }
+        editorTest {
+            client()
+            name 'Cell Editor Render Test'
+            runDir 'build/clienttest'
+            source sourceSets.clienttest
+            programArgs '--width', '1280', '--height', '720'
+        }
+        gametest {
+            server()
+            name 'Cell Game Tests'
+            vmArg '-Dfabric-api.gametest'
+            vmArg "-Dfabric-api.gametest.report-file=${project.layout.buildDirectory.get()}/gametest-results.xml"
+            runDir 'build/gametest'
+            source sourceSets.gametest
+        }
+    }
+}
+sourceSets.clienttest.compileClasspath += sourceSets.client.output + sourceSets.client.compileClasspath
+sourceSets.clienttest.runtimeClasspath += sourceSets.client.output + sourceSets.client.runtimeClasspath
+java { toolchain.languageVersion = JavaLanguageVersion.of(21); withSourcesJar() }
+tasks.withType(JavaCompile).configureEach { options.release = 21; options.encoding = 'UTF-8' }
+processResources { inputs.property 'version', project.version; filesMatching('fabric.mod.json') { expand version: project.version } }
+test { useJUnitPlatform() }

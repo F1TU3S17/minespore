@@ -1,0 +1,6 @@
+00e55770 propulsion_ramp_factor
+00e61e20 orientation_turn_step
+00e513b0 bounded_remap
+00e68990 npc_target_query
+00e69a90 eating_event_candidate
+00e5ec70 progress_event_candidate

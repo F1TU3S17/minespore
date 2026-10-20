@@ -1,0 +1,1 @@
+013f710c 16 cell_drag_handler_vtable

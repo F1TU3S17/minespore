@@ -1,0 +1,7 @@
+004a2860 attach_part_to_parent
+004a4180 attachment_target_candidate
+005aa690 cursor_plane_projection
+005aa640 drag_orientation_vector
+005aaa80 drag_update_guard
+005ab2e0 cell_drag_setup
+0059ab70 attachment_guard_candidate

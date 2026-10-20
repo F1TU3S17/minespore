@@ -1,0 +1,10 @@
+005aabc0 editor_drag_handler_init
+005aacf0 editor_drag_handler_ctor
+005b2280 editor_drag_other_init
+005bc8b0 editor_drag_surface_init
+00491800 part_tree_cost
+0048cc90 part_descendants
+0048fc40 part_tree_transform_candidate
+0059e380 editor_refund_part_cost
+0059e3a0 editor_charge_part_cost
+005a7900 editor_limit_change_notify

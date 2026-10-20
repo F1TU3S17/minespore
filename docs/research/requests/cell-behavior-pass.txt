@@ -1,0 +1,6 @@
+00e6f5b0 player_motion_behavior
+00e6f800 steering_movement_candidate
+00e71300 npc_behavior_1001
+00e7e6c0 cell_pre_update_candidate
+00e528f0 difficulty_ai_data_candidate
+00e76a80 cell_behavior_state_update

@@ -1,0 +1,9 @@
+00e837c0 evaluate_cell_balance_curve
+00e52040 derive_cell_stats_from_parts
+00e7ce10 add_food_progress
+00e51410 earned_editor_currency_curve
+00e59800 open_cell_editor_with_budget
+00e809a0 accept_cell_editor_result
+00e7d070 apply_player_food_reward
+00e686c0 derive_awareness_radii
+00e84600 submit_cell_editor_request

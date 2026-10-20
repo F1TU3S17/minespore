@@ -1,0 +1,16 @@
+00e84600 cell_editor_open
+00e84400 cell_helpers_boundary_candidate
+00e845a0 cell_editor_helper_candidate
+0059e460 limits_get_value
+0059e470 limits_has_enough
+0059e3c0 limits_set_limit
+0059e3e0 limits_ensure_limit
+0059e400 limits_add_value
+0059e430 limits_set_value
+0059e580 limits_part_cost_message
+0059e8d0 limits_validate_creation
+0059eb40 limits_update_part_usage
+0058e6d0 editor_enter
+00588570 editor_mouse_down
+0058be50 editor_update
+0058b650 editor_mouse_up
