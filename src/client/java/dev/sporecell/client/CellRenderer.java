@@ -21,8 +21,8 @@ public final class CellRenderer extends EntityRenderer<CellEntity> {
     @Override public boolean shouldRender(CellEntity e,Frustum frustum,double x,double y,double z) {
         var client=net.minecraft.client.MinecraftClient.getInstance();
         if(CellClient.active && client.getCameraEntity() instanceof CellEntity controlled && controlled!=e && !CellClient.specs.isEmpty()) {
-            double sight=CellClient.body.stats(CellClient.specs).sight();
-            if(controlled.squaredDistanceTo(e)>sight*sight)return false;
+            double sight=CellClient.body.stats(CellClient.specs).sight()*controlled.size()+e.radius();
+            if(e.kind()!=CellEntity.BACKGROUND && controlled.squaredDistanceTo(e)>sight*sight)return false;
         }
         return super.shouldRender(e,frustum,x,y,z);
     }
@@ -32,23 +32,38 @@ public final class CellRenderer extends EntityRenderer<CellEntity> {
     }
     @Override public void render(CellEntity e,float yaw,float tickDelta,MatrixStack m,VertexConsumerProvider provider,int light) {
         VertexConsumer v=provider.getBuffer(RenderLayer.getEntitySolid(WHITE));m.push();
+        float size=(float)e.size();m.scale(size,size,size);
         m.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(-yaw));
-        if(e.food()) {
+        if(e.kind()==CellEntity.ROCK) {
+            box(m,v,light,0x54877C,0,-.3f,0,1.6f,1.1f,1.4f);
+            box(m,v,light,0x74A094,.35f,.6f,-.2f,.85f,.5f,.9f);
+            box(m,v,light,0x97B493,-.4f,.7f,.1f,.35f,.23f,.35f);
+        } else if(e.food()) {
             box(m,v,light,e.kind()==CellEntity.PLANT?0x92D653:0xEF897B,0,.05f,0,.25f,.23f,.25f);
             box(m,v,light,e.kind()==CellEntity.PLANT?0xC6F27D:0xFFC6AB,.1f,.23f,0,.13f,.1f,.13f);
         } else for(Blueprint.Piece p:e.blueprint().pieces()) {
             PartSpec spec=CellClient.specs.get(p.part());int color=spec==null?0x71D9B5:spec.color();
-            if(e.kind()==CellEntity.HUNTER && p.part()==Part.CORE)color=0xBB667B;
+            if(p.part()==Part.BODY||p.part()==Part.CORE) {
+                int[] palette=e.kind()==CellEntity.HUNTER?new int[]{0xBB667B,0xD08A63,0x996AAF}:new int[]{0x67BDB5,0x91B969,0xAB86BA,0xCCAC6B};
+                if(e.owner==null && e.kind()!=CellEntity.PLAYER)color=palette[Math.floorMod(e.getUuid().hashCode(),palette.length)];
+            }
+            if(e.kind()==CellEntity.BACKGROUND)color=0x386C7C;
             float x=p.x()*.65f,z=p.z()*.65f;
             box(m,v,light,color,x,0,z,.59f,p.part()==Part.ARMOR?.65f:.42f,.59f);
             m.push();m.translate(x,0,z);m.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(-p.direction()*90));
             switch(p.part()) {
-                case CORE -> box(m,v,light,0x317A80,0,.43f,0,.23f,.12f,.23f);
+                case CORE -> {
+                    box(m,v,light,0x317A80,0,.43f,0,.23f,.12f,.23f);
+                    if(e.blueprint().pieces().stream().noneMatch(q->q.part()==Part.EYE))for(int side:new int[]{-1,1}) {
+                        box(m,v,light,0xE7EED9,side*.17f,.43f,-.19f,.13f,.11f,.14f);
+                        box(m,v,light,0x183A48,side*.17f,.55f,-.22f,.06f,.025f,.07f);
+                    }
+                }
                 case EYE -> {
                     box(m,v,light,0xF5F4E9,0,.42f,0,.34f,.26f,.34f);
                     box(m,v,light,0x132F43,0,.69f,-.055f,.17f,.03f,.17f);
                 }
-                case HERBIVORE_MOUTH,CARNIVORE_MOUTH -> {
+                case HERBIVORE_MOUTH,CARNIVORE_MOUTH,OMNIVORE_MOUTH -> {
                     box(m,v,light,0x314656,-.17f,.43f,-.16f,.13f,.1f,.35f);
                     box(m,v,light,0x314656,.17f,.43f,-.16f,.13f,.1f,.35f);
                 }

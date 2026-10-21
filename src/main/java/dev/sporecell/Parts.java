@@ -18,7 +18,9 @@ public final class Parts {
                     Files.copy(Objects.requireNonNull(defaults),path);
                 }
             }
-            Properties props = new Properties(); try (Reader r=Files.newBufferedReader(path)) { props.load(r); }
+            Properties props = new Properties();
+            try(InputStream defaults=Parts.class.getResourceAsStream("/parts.properties")) { props.load(Objects.requireNonNull(defaults)); }
+            try (Reader r=Files.newBufferedReader(path)) { props.load(r); }
             EnumMap<Part,PartSpec> result = new EnumMap<>(Part.class);
             for (Part part : Part.values()) {
                 String[] v = props.getProperty(part.name(),"").split(",");

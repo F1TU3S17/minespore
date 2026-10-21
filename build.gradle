@@ -3,7 +3,7 @@ plugins {
     id 'maven-publish'
 }
 
-version = '0.1.0'
+version = '0.2.0'
 group = 'dev.sporecell'
 base { archivesName = 'spore-cell' }
 repositories { mavenCentral() }
@@ -38,6 +38,15 @@ loom {
             runDir 'build/worldtest'
             source sourceSets.clienttest
             vmArg '-Dsporecell.test.world=true'
+            programArgs '--width', '1280', '--height', '720'
+        }
+        dedicatedTest {
+            client()
+            name 'Dedicated Cell Mode Test'
+            runDir 'build/dedicatedtest'
+            source sourceSets.clienttest
+            vmArg '-Dsporecell.test.world=true'
+            vmArg '-Dsporecell.test.dedicated=true'
             programArgs '--width', '1280', '--height', '720'
         }
         editorTest {

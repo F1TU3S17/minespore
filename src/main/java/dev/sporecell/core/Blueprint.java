@@ -11,20 +11,24 @@ public record Blueprint(List<Piece> pieces) {
 
     public Blueprint { pieces = List.copyOf(pieces); }
     public static Blueprint starter() {
+        return starter(Evolution.Diet.HERBIVORE);
+    }
+    public static Blueprint starter(Evolution.Diet diet) {
         return new Blueprint(List.of(new Piece(0, 0, Part.CORE, 0),
-                new Piece(0, -1, Part.HERBIVORE_MOUTH, 0), new Piece(0, 1, Part.FLAGELLUM, 2)));
+                new Piece(0, -1,diet==Evolution.Diet.CARNIVORE?Part.CARNIVORE_MOUTH:
+                        diet==Evolution.Diet.OMNIVORE?Part.OMNIVORE_MOUTH:Part.HERBIVORE_MOUTH, 0), new Piece(0, 1, Part.FLAGELLUM, 2)));
     }
     public void validate() {
-        if (pieces.isEmpty() || pieces.size() > 49) throw new IllegalArgumentException("Use 1..49 parts");
+        if (pieces.isEmpty() || pieces.size() > 49) throw new IllegalArgumentException("Допустимо от 1 до 49 деталей");
         Map<String, Piece> occupied = new HashMap<>();
         int cores = 0;
         for (Piece p : pieces) {
             if (p.part == null || Math.abs(p.x) > RADIUS || Math.abs(p.z) > RADIUS || p.direction < 0 || p.direction > 3)
-                throw new IllegalArgumentException("Part outside grid or invalid rotation");
-            if (occupied.put(key(p.x, p.z), p) != null) throw new IllegalArgumentException("Overlapping parts");
-            if (p.part == Part.CORE) { cores++; if (p.x != 0 || p.z != 0) throw new IllegalArgumentException("Core must be centered"); }
+                throw new IllegalArgumentException("Деталь вне сетки или неверный поворот");
+            if (occupied.put(key(p.x, p.z), p) != null) throw new IllegalArgumentException("Детали пересекаются");
+            if (p.part == Part.CORE) { cores++; if (p.x != 0 || p.z != 0) throw new IllegalArgumentException("Ядро должно быть в центре"); }
         }
-        if (cores != 1) throw new IllegalArgumentException("Exactly one central core is required");
+        if (cores != 1) throw new IllegalArgumentException("Нужно одно ядро в центре");
         Set<String> visited = new HashSet<>();
         ArrayDeque<Piece> queue = new ArrayDeque<>(); queue.add(occupied.get(key(0,0)));
         while (!queue.isEmpty()) {
@@ -34,7 +38,7 @@ public record Blueprint(List<Piece> pieces) {
                 if (next != null && !visited.contains(key(next.x,next.z))) queue.add(next);
             }
         }
-        if (visited.size() != pieces.size()) throw new IllegalArgumentException("All parts must connect to the core");
+        if (visited.size() != pieces.size()) throw new IllegalArgumentException("Все детали должны соединяться с ядром");
     }
     private static String key(int x,int z) { return x + ":" + z; }
     public Stats stats(Map<Part, PartSpec> specs) {
@@ -47,10 +51,11 @@ public record Blueprint(List<Piece> pieces) {
             thrust += s.thrust() * alignment;
             turn += s.turn() * (1 + Math.abs(p.x) * .15);
             sight += s.sight(); damage = Math.max(damage,s.damage());
-            herb |= p.part == Part.HERBIVORE_MOUTH; carn |= p.part == Part.CARNIVORE_MOUTH;
+            herb |= p.part == Part.HERBIVORE_MOUTH || p.part==Part.OMNIVORE_MOUTH;
+            carn |= p.part == Part.CARNIVORE_MOUTH || p.part==Part.OMNIVORE_MOUTH;
         }
-        return new Stats(cost, Math.max(1,hp), Math.min(.38,(.075+thrust)/Math.sqrt(pieces.size()*.35)),
-                Math.min(18, 3+turn), Math.min(64,6+sight), damage, herb,carn);
+        return new Stats(cost, Evolution.MAX_HEALTH, Math.min(.38,(.075+thrust)/Math.sqrt(pieces.size()*.35)),
+                Math.min(18, 3+turn), Math.min(96,20+sight), damage, herb,carn);
     }
     public static int purchaseCost(Blueprint old, Blueprint next, Map<Part,PartSpec> specs) {
         // Full salvage value prevents charging again for an existing body.

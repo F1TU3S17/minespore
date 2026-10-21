@@ -29,7 +29,7 @@ class BlueprintTest {
     @Test void editingRoundTripCannotMintDna() {
         var map=specs();Blueprint a=Blueprint.starter();var pieces=new ArrayList<>(a.pieces());pieces.add(new Blueprint.Piece(1,0,Part.ARMOR,0));Blueprint b=new Blueprint(pieces);
         int spent=Blueprint.purchaseCost(a,b,map);assertEquals(5,spent);assertEquals(0,spent+Blueprint.purchaseCost(b,a,map));
-        assertEquals(0,Blueprint.purchaseCost(b,b,map));assertTrue(b.stats(map).health()>a.stats(map).health());
+        assertEquals(0,Blueprint.purchaseCost(b,b,map));assertEquals(6,b.stats(map).health());
     }
     @Test void propulsionMountingAndManeuveringMatter() {
         var map=specs();Blueprint core=new Blueprint(List.of(new Blueprint.Piece(0,0,Part.CORE,0)));

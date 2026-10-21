@@ -33,7 +33,12 @@ public final class EditorRenderTest implements ClientModInitializer {
                 if(draft.pieces().size()!=5 || Blueprint.purchaseCost(CellClient.body,draft,CellClient.specs)!=4
                         || draft.pieces().stream().noneMatch(p->p.x()==1&&p.z()==1&&p.direction()==1))
                     throw new AssertionError("Editor placement, rotation, removal or budget failed");
-                SporeCell.LOGGER.info("Editor interaction assertions passed");
+                screen.keyPressed(GLFW.GLFW_KEY_S,0,0);screen.mouseClicked(x,z,0);
+                if(screen.draft().pieces().size()!=6)throw new AssertionError("Symmetry did not place mirrored part");
+                screen.keyPressed(GLFW.GLFW_KEY_Z,0,0);
+                if(!screen.draft().equals(draft))throw new AssertionError("Undo did not restore mirrored edit");
+                if(!screen.getTitle().getString().contains("Редактор"))throw new AssertionError("Missing Russian title");
+                SporeCell.LOGGER.info("Editor interaction assertions passed: place, rotate, remove, DNA, symmetry, undo, Russian");
             }
             if(ticks==65)ScreenshotRecorder.saveScreenshot(client.runDirectory,imageName,client.getFramebuffer(),text->SporeCell.LOGGER.info("Editor screenshot: {}",text.getString()));
             if(ticks==90)client.scheduleStop();

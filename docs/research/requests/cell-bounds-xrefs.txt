@@ -1,0 +1,4 @@
+016b3c88 cell_bounds_min_x
+016b3c8c cell_bounds_min_y
+016b3c94 cell_bounds_max_x
+016b3c98 cell_bounds_max_y
