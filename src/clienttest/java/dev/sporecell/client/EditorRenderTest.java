@@ -48,6 +48,20 @@ public final class EditorRenderTest implements ClientModInitializer {
                 if(!screen.draft().equals(draft))throw new AssertionError("Undo lost transforms");
                 screen.keyPressed(GLFW.GLFW_KEY_Y,0,0);screen.keyPressed(GLFW.GLFW_KEY_Z,0,0);
                 if(!screen.draft().equals(draft))throw new AssertionError("Redo lost transforms");
+                screen.mouseDragged(screen.width/2d,screen.height/2d,1,600,-400);
+                if(screen.view.pitch>=20&&screen.view.pitch<=80)throw new AssertionError("Orbit still clamps elevation");
+                for(float angle:new float[]{-150,-90,0,90,170}){
+                    screen.view.pitch=angle;var projected=screen.view.project(0,.21,0);
+                    if(screen.view.pick(draft.pieces(),projected.x,projected.y,true)==null)throw new AssertionError("Picking fails from underside/pole: "+angle);
+                }
+                screen.keyPressed(GLFW.GLFW_KEY_HOME,0,0);
+                if(screen.view.pitch!=52||screen.view.yaw!=25||screen.view.roll!=0)throw new AssertionError("Camera reset failed");
+                screen.mouseClicked(108,43+7*15+8,0);
+                var captions=net.fabricmc.fabric.api.client.screen.v1.Screens.getButtons(screen).stream().map(b->b.getMessage().getString()).toList();
+                for(String name:new String[]{"Реактивный","Яд","Электроорган","Глаз-стебелёк","Глаз-пуговка"})if(captions.stream().noneMatch(s->s.contains(name)))throw new AssertionError("Part missing from catalog: "+name);
+                var electric=net.fabricmc.fabric.api.client.screen.v1.Screens.getButtons(screen).stream().filter(b->b.getMessage().getString().contains("Электроорган")).findFirst().orElseThrow();
+                if(electric.active)throw new AssertionError("Undiscovered organ is selectable");screen.choose(Part.ELECTRIC);
+                if(!screen.draft().equals(draft))throw new AssertionError("Locked organ changed the draft");
                 SporeCell.LOGGER.info("3D EDITOR TEST PASSED: voxel body, surface attachment, symmetry, scaling, rotation, undo, redo, DNA");
             }
             if(ticks==65)ScreenshotRecorder.saveScreenshot(client.runDirectory,imageName,client.getFramebuffer(),text->SporeCell.LOGGER.info("Editor screenshot: {}",text.getString()));

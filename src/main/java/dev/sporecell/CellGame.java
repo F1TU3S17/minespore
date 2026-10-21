@@ -67,6 +67,7 @@ public final class CellGame {
         p.active=false; save.markDirty(); sync(player,false,"");
     }
     public static void disconnect(ServerPlayerEntity player) {
+        CellDiscovery.disconnect(player.getUuid());
         CellReproduction.cancel(player.getUuid());TARGETS.remove(player.getUuid());
         CellEntity cell=ACTIVE.remove(player.getUuid());
         if(cell!=null) {
@@ -109,8 +110,8 @@ public final class CellGame {
             if(obj.get("revision").getAsInt()!=p.revision) { sync(player,true,"Прогресс изменился. Откройте редактор заново.");return; }
             Blueprint next=SporeCell.GSON.fromJson(obj.get("body"),Blueprint.class);next.validate();
             int cost=Blueprint.purchaseCost(p.blueprint,next,Parts.SPECS);
-            if(next.pieces().stream().anyMatch(piece->piece.part()==Part.OMNIVORE_MOUTH) && p.progress<100) {
-                sync(player,true,"Всеядный рот открывается при 100 очках эволюции.");return;
+            if(!CellUnlocks.permits(p.unlocked,next)) {
+                sync(player,true,"Сначала найдите эту часть в мире: в метеорите или останках клетки.");return;
             }
             if(cost>p.dna) { sync(player,true,"Недостаточно ДНК");return; }
             double oldMax=p.blueprint.stats(Parts.SPECS).health(),newMax=next.stats(Parts.SPECS).health();
@@ -128,6 +129,8 @@ public final class CellGame {
         state.addProperty("dna",p.dna);state.addProperty("health",p.health);state.addProperty("revision",p.revision);
         state.addProperty("eaten",p.eaten);state.addProperty("deaths",p.deaths);state.addProperty("message",message);
         state.addProperty("generation",p.generation);state.add("history",SporeCell.GSON.toJsonTree(p.history));
+        state.add("unlocked",SporeCell.GSON.toJsonTree(p.unlocked));
+        var discovery=CellDiscovery.notice(player);state.add("discovery",SporeCell.GSON.toJsonTree(discovery));
         state.addProperty("mating",CellReproduction.phase(player.getUuid()));state.addProperty("mateId",CellReproduction.partnerId(player.getUuid()));
         state.addProperty("breedNeeded",CellReproduction.foodNeeded(p));state.addProperty("evolution",CellReproduction.ready(player.getUuid()));
         state.addProperty("progress",p.progress);state.addProperty("level",Evolution.level(p.progress));
@@ -155,6 +158,7 @@ public final class CellGame {
             if(player.getWorld()!=cell.getWorld()) { leave(player);continue; }
             if(player.getCameraEntity()!=cell) player.setCameraEntity(cell);
             if(player.squaredDistanceTo(cell)>64) player.teleport((ServerWorld)cell.getWorld(),cell.getX(),PLANE+2,cell.getZ(),0,0);
+            if(!EDITING.contains(player.getUuid()))CellDiscovery.collect(player,cell);
             if(server.getTicks()%20==0) { p.health=cell.health();save.markDirty();sync(player,false,""); }
         }
         ServerWorld world=server.getWorld(SporeCell.POND);
@@ -177,11 +181,12 @@ public final class CellGame {
         List<CellEntity> players=ACTIVE.values().stream().filter(e->e.getWorld()==world&&!e.isRemoved()).toList();
         if(players.isEmpty())return;
         List<CellEntity> all=new ArrayList<>();
-        for(var entity:world.iterateEntities())if(entity instanceof CellEntity cell && cell.owner==null && cell.kind()<CellEntity.MATE)all.add(cell);
-        for(CellEntity cell:all)if(players.stream().noneMatch(p->p.squaredDistanceTo(cell)<Math.pow(58*p.size(),2)))cell.discard();
+        for(var entity:world.iterateEntities())if(entity instanceof CellEntity cell && cell.owner==null && (cell.kind()<CellEntity.MATE||cell.discovery()))all.add(cell);
+        for(CellEntity cell:all)if(players.stream().noneMatch(p->p.squaredDistanceTo(cell)<Math.pow(Math.min(80,58*p.size()),2)))cell.discard();
         for(CellEntity player:players) {
+            CellDiscovery.populate(world,player);
             int[] count=new int[7];
-            for(CellEntity cell:all)if(!cell.isRemoved()&&player.squaredDistanceTo(cell)<Math.pow(45*player.size(),2))count[cell.kind()]++;
+            for(CellEntity cell:all)if(cell.kind()<CellEntity.MATE&&!cell.isRemoved()&&player.squaredDistanceTo(cell)<Math.pow(Math.min(64,45*player.size()),2))count[cell.kind()]++;
             int[] quotas={0,10,5,50,16,7,7};
             for(int kind=1;kind<quotas.length;kind++)for(int i=count[kind];i<quotas[kind];i++)randomSpawn(world,kind,player);
         }
@@ -190,25 +195,12 @@ public final class CellGame {
         CellEntity e=new CellEntity(SporeCell.CELL,world);e.kind(kind);e.blueprint(body);
         e.refreshPositionAndAngles(x,PLANE,z,0,0);e.health((float)body.stats(Parts.SPECS).health());world.spawnEntity(e);return e;
     }
-    private static Blueprint species(int variant,boolean hunter) {
-        if(variant==5)return Blueprint.starter(hunter?Evolution.Diet.CARNIVORE:Evolution.Diet.HERBIVORE);
-        List<Blueprint.Piece> pieces=new ArrayList<>();
-        pieces.add(new Blueprint.Piece(0,0,Part.CORE,0));
-        pieces.add(new Blueprint.Piece(0,-1,hunter?Part.CARNIVORE_MOUTH:variant%4==3?Part.OMNIVORE_MOUTH:Part.HERBIVORE_MOUTH,0));
-        pieces.add(new Blueprint.Piece(0,1,Part.FLAGELLUM,2));
-        pieces.add(new Blueprint.Piece(-1,0,Part.EYE,3));
-        pieces.add(new Blueprint.Piece(1,0,variant%2==0?Part.EYE:Part.BODY,1));
-        if(variant%3==0) {pieces.add(new Blueprint.Piece(-1,1,Part.CILIA,3));pieces.add(new Blueprint.Piece(1,1,Part.CILIA,1));}
-        if(variant%3==1) {pieces.add(new Blueprint.Piece(0,2,Part.BODY,2));pieces.add(new Blueprint.Piece(0,3,Part.FLAGELLUM,2));}
-        if(hunter)pieces.add(new Blueprint.Piece(1,-1,Part.SPIKE,0));
-        return new Blueprint(pieces);
-    }
     private static void randomSpawn(ServerWorld world,int kind,CellEntity player) {
         double scale=player.size(),angle=world.random.nextDouble()*Math.PI*2;
-        double distance=(kind==CellEntity.PLANT||kind==CellEntity.MEAT?3+world.random.nextDouble()*24:9+world.random.nextDouble()*29)*scale;
+        double distance=(kind==CellEntity.PLANT||kind==CellEntity.MEAT?3+world.random.nextDouble()*24:9+world.random.nextDouble()*29)*Math.min(scale,1.65);
         double x=player.getX()+Math.cos(angle)*distance,z=player.getZ()+Math.sin(angle)*distance;
-        int variant=world.random.nextInt(6);
-        Blueprint body=species(variant,kind==CellEntity.HUNTER);
+        int variant=world.random.nextInt(CellSpecies.COUNT);
+        Blueprint body=CellSpecies.create(variant,kind==CellEntity.HUNTER);
         if(kind==CellEntity.ROCK)body=new Blueprint(List.of(new Blueprint.Piece(0,0,Part.CORE,0)));
         CellEntity spawned=spawn(world,kind,x,z,body);
         int delta=kind==CellEntity.HUNTER?world.random.nextBetween(0,3):world.random.nextBetween(-2,2);
@@ -222,14 +214,26 @@ public final class CellGame {
         if(e.getWorld().getRegistryKey()!=SporeCell.POND) return;
         ServerWorld world=(ServerWorld)e.getWorld();
         if(e.owner!=null && ACTIVE.get(e.owner)!=e) { e.discard();return; }
+        if(e.discovery())return;
         if(e.hurtCooldown>0)e.hurtCooldown--;
         if(e.kind()==CellEntity.BACKGROUND) {
             double t=(e.age+e.getId()*17)*.008;
             e.setPosition(e.getX()+Math.cos(t)*.012*e.size(),e.getY(),e.getZ()+Math.sin(t)*.012*e.size());return;
         }
+        if(e.kind()==CellEntity.POISON_CLOUD){poisonCloud(e);return;}
         if(e.kind()>=CellEntity.MATE){if(!CellReproduction.owns(e))e.discard();return;}
         if(e.food()||e.kind()==CellEntity.ROCK)return;
         if(e.owner!=null && EDITING.contains(e.owner))return;
+        if(e.poisonTicks>0){
+            e.poisonTicks--;
+            if(e.poisonTicks%20==0&&!e.has(Part.POISON)){
+                var source=world.getEntity(e.poisonSource);hit(source instanceof CellEntity cell?cell:null,e,(float)Parts.SPECS.get(Part.POISON).damage());
+                if(e.isRemoved())return;
+            }
+        }
+        if(e.poisonCooldown>0)e.poisonCooldown--;if(e.electricCooldown>0)e.electricCooldown--;if(e.electricTicks>0)e.electricTicks--;
+        e.effects((e.poisonTicks>0?1:0)|(e.electricTicks>0?2:0)|(e.has(Part.JET)&&e.age%60<12?4:0));
+        if(e.stunTicks>0){e.stunTicks--;e.setVelocity(Vec3d.ZERO);return;}
         Blueprint.Stats stats=e.blueprint().stats(Parts.SPECS);
         double x=0,z=0;
         if(e.owner!=null) {
@@ -243,14 +247,15 @@ public final class CellGame {
             double target=Math.toDegrees(Math.atan2(x,-z));e.setYaw((float)Motion.steer(e.getYaw(),target,e.owner==null?stats.turn():Math.max(8,stats.turn()*1.5)));
         }
         double angle=Math.toRadians(e.getYaw());
-        Vec3d desired=length>.001?new Vec3d(Math.sin(angle),0,-Math.cos(angle)).multiply(stats.speed()*e.size()*Math.min(1,length)):Vec3d.ZERO;
+        double burst=e.has(Part.JET)&&e.age%60<12?CellAbilities.jetBoost:1;
+        Vec3d desired=length>.001?new Vec3d(Math.sin(angle),0,-Math.cos(angle)).multiply(stats.speed()*e.size()*Math.min(1,length)*burst):Vec3d.ZERO;
         // Desired-velocity feedback and exponential drag, in Minecraft's 20 Hz time step.
         double response=1-Math.exp(-.05*5);
         Vec3d velocity=e.getVelocity().add(desired.subtract(e.getVelocity()).multiply(response));
         // Check every occupied cube, including off-center appendages, against obstacles.
-        if(!clear(e,e.getX()+velocity.x,e.getZ()+velocity.z)) velocity=Vec3d.ZERO;
+        if(!clear(e,e.getX()+velocity.x,e.getZ()+velocity.z)) {velocity=Vec3d.ZERO;if(e.owner==null){e.setYaw(e.getYaw()+45);e.inputX=Math.sin(Math.toRadians(e.getYaw()));e.inputZ=-Math.cos(Math.toRadians(e.getYaw()));e.behavior="avoid";}}
         e.setVelocity(velocity);e.move(MovementType.SELF,velocity);e.setPosition(e.getX(),PLANE,e.getZ());
-        if(e.age%4==0) interact(e,stats);
+        if(e.age%4==0) {specialAttack(e);interact(e,stats);}
     }
     private static boolean clear(CellEntity e,double x,double z) {
 
@@ -278,17 +283,57 @@ public final class CellGame {
     private static void think(CellEntity e,Blueprint.Stats stats) {
         List<CellEntity> nearby=e.getWorld().getEntitiesByClass(CellEntity.class,e.getBoundingBox().expand(stats.sight()*e.size()),
                 other->other!=e && !other.isRemoved() && !other.scenery() && (other.owner==null||!EDITING.contains(other.owner)));
-        CellEntity threat=nearby.stream().filter(o->!o.food()&&o.blueprint().stats(Parts.SPECS).carnivore()
-                &&o.level()>e.level()).min(Comparator.comparingDouble(e::squaredDistanceTo)).orElse(null);
+        CellEntity threat=nearby.stream().filter(o->!o.food()&&(o.blueprint().stats(Parts.SPECS).carnivore()||o.has(Part.ELECTRIC))
+                &&(o.level()>e.level()||e.health()<=2&&o.level()>=e.level())).min(Comparator.comparingDouble(e::squaredDistanceTo)).orElse(null);
         CellEntity target;
         if(threat!=null) { e.behavior="flee"; e.inputX=e.getX()-threat.getX();e.inputZ=e.getZ()-threat.getZ();return; }
         target=nearby.stream().filter(o->(o.kind()==CellEntity.PLANT&&stats.herbivore())||(o.kind()==CellEntity.MEAT&&stats.carnivore())
                 ||(!o.food()&&stats.carnivore()&&o.level()<=e.level()))
                 .min(Comparator.comparingDouble(e::squaredDistanceTo)).orElse(null);
-        if(target!=null) { e.behavior=target.food()?"feed":"hunt";e.inputX=target.getX()-e.getX();e.inputZ=target.getZ()-e.getZ(); }
+        var food=nearby.stream().filter(o->o.kind()==CellEntity.PLANT&&stats.herbivore()||o.kind()==CellEntity.MEAT&&stats.carnivore()).min(Comparator.comparingDouble(e::squaredDistanceTo)).orElse(null);
+        if(food!=null&&(e.health()<4||Math.floorMod(e.getUuid().hashCode(),3)==0))target=food;
+        if(target!=null) {
+            e.behavior=target.food()?"feed":"hunt";
+            double dx=target.getX()-e.getX(),dz=target.getZ()-e.getZ();
+            if(!target.food()&&e.has(Part.POISON)&&e.squaredDistanceTo(target)<9*e.size()*e.size()){
+                e.behavior="circle";e.inputX=-dz+dx*.2;e.inputZ=dx+dz*.2;
+            }else if(!target.food()&&Math.floorMod(e.getUuid().hashCode(),3)==1){
+                e.behavior="ambush";e.inputX=dx+target.getVelocity().x*6;e.inputZ=dz+target.getVelocity().z*6;
+            }else{e.inputX=dx;e.inputZ=dz;}
+        }
         else if(e.age%60==0 || (e.inputX==0&&e.inputZ==0)) {
             e.behavior="wander";double a=e.getWorld().random.nextDouble()*Math.PI*2;
             e.inputX=Math.sin(a);e.inputZ=Math.cos(a);
+        }
+        for(var other:nearby)if(!other.food()&&other.kind()==e.kind()&&e.squaredDistanceTo(other)<Math.pow(2*e.size(),2)){
+            e.inputX+=(e.getX()-other.getX())*.6;e.inputZ+=(e.getZ()-other.getZ())*.6;
+        }
+    }
+    private static void specialAttack(CellEntity e){
+        if(!e.has(Part.POISON)&&!e.has(Part.ELECTRIC))return;
+        double radius=CellAbilities.electricRadius*e.size();
+        var targets=e.getWorld().getEntitiesByClass(CellEntity.class,e.getBoundingBox().expand(radius),o->o!=e&&o.kind()<CellEntity.PLANT&&!o.isRemoved()&&(o.owner==null||!EDITING.contains(o.owner))&&e.squaredDistanceTo(o)<radius*radius);
+        if(targets.isEmpty())return;
+        if(e.has(Part.ELECTRIC)&&e.electricCooldown==0){
+            e.effectRange(CellAbilities.electricRadius);
+            e.electricTicks=8;e.electricCooldown=CellAbilities.electricCooldown;
+            for(var target:targets)if(!target.has(Part.ELECTRIC)){
+                hit(e,target,(float)Parts.SPECS.get(Part.ELECTRIC).damage());target.stunTicks=CellAbilities.stunDuration;
+            }
+        }
+        if(e.has(Part.POISON)&&e.poisonCooldown==0){
+            var part=e.blueprint().pieces().stream().filter(p->p.part()==Part.POISON).findFirst().orElseThrow();
+            var point=e.getPos().add(offset(e,part));
+            var cloud=spawn((ServerWorld)e.getWorld(),CellEntity.POISON_CLOUD,point.x,point.z,new Blueprint(List.of(new Blueprint.Piece(0,0,Part.CORE,0))));
+            cloud.source=e.getUuid();cloud.level(e.level());cloud.effectRange(CellAbilities.poisonRadius);cloud.cloudTicks=CellAbilities.poisonLifetime;e.poisonCooldown=CellAbilities.poisonCooldown;
+        }
+    }
+    private static void poisonCloud(CellEntity cloud){
+        if(cloud.source==null||--cloud.cloudTicks<=0){cloud.discard();return;}
+        if(cloud.age%10!=0)return;
+        double radius=CellAbilities.poisonRadius*cloud.size();
+        for(var target:cloud.getWorld().getEntitiesByClass(CellEntity.class,cloud.getBoundingBox().expand(radius),o->o.kind()<CellEntity.PLANT&&!o.getUuid().equals(cloud.source)&&!o.has(Part.POISON)&&!o.isRemoved()&&(o.owner==null||!EDITING.contains(o.owner))&&cloud.squaredDistanceTo(o)<radius*radius)){
+            target.poisonTicks=CellAbilities.poisonDuration;target.poisonSource=cloud.source;
         }
     }
     private static void interact(CellEntity e,Blueprint.Stats stats) {
@@ -331,13 +376,12 @@ public final class CellGame {
         p.eaten++;p.health=e.health();e.level(Evolution.level(p.progress));save.markDirty();
         ServerPlayerEntity player=e.getServer().getPlayerManager().getPlayer(e.owner);
         if(player!=null)sync(player,false,p.progress==1000?"Стадия клетки пройдена! Организм готов к следующему этапу.":
-                before<100&&p.progress>=100?"Открыт всеядный рот. После размножения добавьте его потомку.":
                 Evolution.level(before)!=e.level()?"Рост: уровень "+e.level()+". Клетка увеличилась.":"");
     }
     private static void hit(CellEntity attacker,CellEntity target,float damage) {
         if(target.hurtCooldown>0||damage<=0)return;
         target.hurtCooldown=15;target.health(target.health()-damage);
-        if(attacker.owner!=null){
+        if(attacker!=null&&attacker.owner!=null){
             TARGETS.put(attacker.owner,new CombatTarget(target.getId(),target.level(),Math.max(0,target.health()),damage,++attackSerial,attacker.getServer().getTicks()+80));
             var player=attacker.getServer().getPlayerManager().getPlayer(attacker.owner);if(player!=null)sync(player,false,"");
         }
@@ -347,6 +391,7 @@ public final class CellGame {
         }
         if(target.health()>0)return;
         if(target.owner==null) {
+            CellDiscovery.fromVictim(target);
             CellEntity meat=spawn((ServerWorld)target.getWorld(),CellEntity.MEAT,target.getX(),target.getZ(),Blueprint.starter());
             meat.level(target.level());target.discard();
         } else {

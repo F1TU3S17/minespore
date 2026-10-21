@@ -20,7 +20,7 @@ public final class CellEditor extends Screen {
     final EditorViewport view=new EditorViewport();
     private Part palette=Part.BODY;
     private boolean placing=true,symmetry;
-    private int selected=-1,left,right,top,bottom,paletteStep;
+    private int selected=-1,left,right,top,bottom,paletteStep,palettePage;
     private double rotation,presetPitch,presetRoll,scale=1;
     private int rotationAxis;
     private String error="";
@@ -30,7 +30,8 @@ public final class CellEditor extends Screen {
     static final Map<Part,String> NAMES=Map.ofEntries(
         Map.entry(Part.CORE,"Ядро"),Map.entry(Part.BODY,"Тело"),Map.entry(Part.FLAGELLUM,"Жгутик"),
         Map.entry(Part.CILIA,"Реснички"),Map.entry(Part.EYE,"Глаз"),Map.entry(Part.HERBIVORE_MOUTH,"Фильтратор"),
-        Map.entry(Part.CARNIVORE_MOUTH,"Челюсти"),Map.entry(Part.OMNIVORE_MOUTH,"Хоботок"),Map.entry(Part.SPIKE,"Шип"),Map.entry(Part.ARMOR,"Оболочка"));
+        Map.entry(Part.CARNIVORE_MOUTH,"Челюсти"),Map.entry(Part.OMNIVORE_MOUTH,"Хоботок"),Map.entry(Part.SPIKE,"Шип"),Map.entry(Part.ARMOR,"Оболочка"),
+        Map.entry(Part.JET,"Реактивный"),Map.entry(Part.POISON,"Яд"),Map.entry(Part.ELECTRIC,"Электроорган"),Map.entry(Part.STALK_EYE,"Глаз-стебелёк"),Map.entry(Part.BUTTON_EYE,"Глаз-пуговка"));
     public CellEditor(){super(Text.literal("Редактор организма"));}
     Blueprint draft(){return new Blueprint(pieces);}
     int selectedIndex(){return selected;}
@@ -40,14 +41,17 @@ public final class CellEditor extends Screen {
         view.centerX=(left+right)/2f;view.centerY=(top+bottom)/2f+8;
         double extent=pieces.stream().mapToDouble(p->Math.max(Math.abs(p.px()),Math.abs(p.pz()))+1).max().orElse(2);
         view.zoom=(float)Math.max(12,Math.min(62,Math.min(right-left,bottom-top)/(extent*2.3)));
-        paletteStep=Math.max(13,Math.min(23,(height-102)/10));int y=43;
-        for(Part p:Part.values())if(p!=Part.CORE){
-            addDrawableChild(ButtonWidget.builder(Text.literal("   "+NAMES.get(p)+" "+CellClient.specs.get(p).cost()),b->choose(p))
-                .dimensions(7,y,116,Math.min(20,paletteStep-1)).build());y+=paletteStep;
+        paletteStep=Math.max(12,Math.min(23,(height-114)/8));int y=43;
+        for(Part p:paletteParts()){
+            var button=addDrawableChild(ButtonWidget.builder(Text.literal("   "+NAMES.get(p)+" "+(CellClient.unlocked.contains(p)?CellClient.specs.get(p).cost():"?")),b->choose(p))
+                .dimensions(7,y,116,Math.min(20,paletteStep-1)).build());button.active=CellClient.unlocked.contains(p);y+=paletteStep;
         }
-        symmetryButton=addDrawableChild(ButtonWidget.builder(Text.literal("Симметрия [S]"),b->symmetry=!symmetry).dimensions(7,y+3,116,18).build());
+        addDrawableChild(ButtonWidget.builder(Text.literal("←"),b->page(-1)).dimensions(7,y+2,24,16).build());
+        addDrawableChild(ButtonWidget.builder(Text.literal((palettePage+1)+" / 2"),b->page(1)).dimensions(33,y+2,62,16).build());
+        addDrawableChild(ButtonWidget.builder(Text.literal("→"),b->page(1)).dimensions(97,y+2,26,16).build());
+        symmetryButton=addDrawableChild(ButtonWidget.builder(Text.literal("Симметрия [S]"),b->symmetry=!symmetry).dimensions(7,y+22,116,18).build());
         int x=width-135;
-        addDrawableChild(ButtonWidget.builder(Text.literal("Ось поворота: Y"),b->{rotationAxis=(rotationAxis+1)%3;b.setMessage(Text.literal("Ось поворота: "+new String[]{"Y","X","Z"}[rotationAxis]));}).dimensions(x,89,127,14).build());
+        addDrawableChild(ButtonWidget.builder(Text.literal("Ось поворота: "+new String[]{"Y","X","Z"}[rotationAxis]),b->{rotationAxis=(rotationAxis+1)%3;b.setMessage(Text.literal("Ось поворота: "+new String[]{"Y","X","Z"}[rotationAxis]));}).dimensions(x,89,127,14).build());
         addDrawableChild(ButtonWidget.builder(Text.literal("− размер"),b->resize(-.1)).dimensions(x,105,62,18).build());
         addDrawableChild(ButtonWidget.builder(Text.literal("+ размер"),b->resize(.1)).dimensions(x+65,105,62,18).build());
         addDrawableChild(ButtonWidget.builder(Text.literal("−15°"),b->rotate(-15)).dimensions(x,128,62,18).build());
@@ -56,7 +60,9 @@ public final class CellEditor extends Screen {
         apply=addDrawableChild(ButtonWidget.builder(Text.literal("Сохранить"),b->apply()).dimensions(width/2-106,height-28,100,20).build());
         addDrawableChild(ButtonWidget.builder(Text.literal("Отмена"),b->close()).dimensions(width/2+6,height-28,100,20).build());
     }
-    void choose(Part p){palette=p;placing=true;selected=-1;rotation=presetPitch=presetRoll=0;scale=1;pending=null;}
+    void choose(Part p){if(!CellClient.unlocked.contains(p)){error="Сначала найдите эту часть в мире";return;}palette=p;placing=true;selected=-1;rotation=presetPitch=presetRoll=0;scale=1;pending=null;}
+    private List<Part> paletteParts(){return Arrays.stream(Part.values()).filter(p->p!=Part.CORE).skip(palettePage*7L).limit(7).toList();}
+    private void page(int direction){float zoom=view.zoom;palettePage=Math.floorMod(palettePage+direction,2);clearChildren();init();view.zoom=zoom;}
     private void remember(){undo.push(List.copyOf(pieces));if(undo.size()>64)undo.removeLast();redo.clear();error="";}
     private boolean inside(double x,double y){return x>=left&&x<right&&y>=top&&y<bottom;}
     private boolean functional(){return palette!=Part.BODY&&palette!=Part.ARMOR&&palette!=Part.CORE;}
@@ -123,7 +129,7 @@ public final class CellEditor extends Screen {
     @Override public void render(DrawContext draw,int mx,int my,float delta){
         draw.fill(0,0,width,height,0xFF102A35);
         draw.drawCenteredTextWithShadow(textRenderer,"РЕДАКТОР ОРГАНИЗМА · ДНК "+CellClient.dna,width/2,10,0xD4F5E5);
-        draw.drawCenteredTextWithShadow(textRenderer,"ЛКМ: деталь · ПКМ: обзор · Колесо: размер · Shift+колесо: камера",width/2,27,0xA7BFCA);
+        draw.drawCenteredTextWithShadow(textRenderer,"ПКМ: орбита · Shift+ПКМ: крен · Home: сброс · Shift+колесо: зум",width/2,27,0xA7BFCA);
         draw.fill(left,top,right,bottom,0xFF173B48);
         draw.enableScissor(left,top,right,bottom);
         if(placing&&!functional())grid(draw);
@@ -146,7 +152,7 @@ public final class CellEditor extends Screen {
             var b=draft();var stats=b.stats(CellClient.specs);int cost=Blueprint.purchaseCost(original,b,CellClient.specs);
             draw.drawText(textRenderer,String.format(Locale.ROOT,"Скорость %.2f",stats.speed()),left+4,top+4,0xAECFD4,false);
             draw.drawText(textRenderer,String.format(Locale.ROOT,"Обзор %.0f",stats.sight()),left+4,top+16,0xAECFD4,false);
-            apply.active=cost<=CellClient.dna&&(CellClient.progress>=100||pieces.stream().noneMatch(p->p.part()==Part.OMNIVORE_MOUTH));
+            apply.active=cost<=CellClient.dna&&CellUnlocks.permits(CellClient.unlocked,b);
             draw.drawText(textRenderer,"Расход: "+cost+" ДНК",sx,173,cost>CellClient.dna?0xFF8888:0xA3E8B2,false);
             draw.drawText(textRenderer,"Остаток: "+(CellClient.dna-cost),sx,184,0xFFFFFF,false);
             if(height>300){
@@ -159,7 +165,7 @@ public final class CellEditor extends Screen {
         draw.drawCenteredTextWithShadow(textRenderer,status.isEmpty()?"R: поворот · Z/Y: отмена/повтор · Del: убрать":status,width/2,height-43,status.isEmpty()?0xA7BFCA:0xFFD594);
         super.render(draw,mx,my,delta);
         int row=0;
-        for(Part p:Part.values())if(p!=Part.CORE){
+        for(Part p:paletteParts()){
             int y=43+row++*paletteStep;
             if(p==palette&&placing)draw.fill(4,y,7,y+Math.min(20,paletteStep-1),0xFFFFFF66);
             var icon=draw.getMatrices();icon.push();icon.translate(19,y+13,200);icon.scale(13,-13,13);
@@ -167,7 +173,7 @@ public final class CellEditor extends Screen {
             icon.multiply(net.minecraft.util.math.RotationAxis.POSITIVE_Y.rotationDegrees(25));
             CellRenderer.renderDesign(new Blueprint(List.of(p==Part.BODY||p==Part.ARMOR?new Blueprint.Piece(0,0,p,0):Blueprint.Piece.attachment(0,0,p,0,0,0,0,1))),icon,draw.getVertexConsumers());
             draw.draw();icon.pop();
-            if(mx>=7&&mx<123&&my>=y&&my<y+paletteStep)draw.drawOrderedTooltip(textRenderer,textRenderer.wrapLines(Text.literal(NAMES.get(p)+": перетащите на клетку. "+switch(p){case FLAGELLUM->"Увеличивает тягу.";case CILIA->"Улучшает поворот.";case EYE->"Увеличивает обзор.";case HERBIVORE_MOUTH->"Растительная пища.";case CARNIVORE_MOUTH->"Мясо и укусы.";case OMNIVORE_MOUTH->"Растения и мясо; доступен при росте 100.";case SPIKE->"Направленный контактный урон.";default->"Кубический сегмент тела.";}),180),mx,my);
+            if(mx>=7&&mx<123&&my>=y&&my<y+paletteStep)draw.drawOrderedTooltip(textRenderer,textRenderer.wrapLines(Text.literal(NAMES.get(p)+(CellClient.unlocked.contains(p)?": перетащите на клетку. ":": найдите в метеорите или останках клетки. ")+switch(p){case FLAGELLUM->"Увеличивает тягу.";case CILIA->"Улучшает поворот.";case EYE,STALK_EYE,BUTTON_EYE->"Увеличивает обзор.";case JET->"Тяга и периодическое ускорение.";case POISON->"Ядовитое облако; иммунитет к яду.";case ELECTRIC->"Разряд, оглушение и иммунитет к электричеству.";case HERBIVORE_MOUTH->"Растительная пища.";case CARNIVORE_MOUTH->"Мясо и укусы.";case OMNIVORE_MOUTH->"Растения и мясо.";case SPIKE->"Направленный контактный урон.";default->"Кубический сегмент тела.";}),180),mx,my);
         }
     }
     private void grid(DrawContext draw){
@@ -189,7 +195,7 @@ public final class CellEditor extends Screen {
         return true;
     }
     @Override public boolean mouseDragged(double mx,double my,int button,double dx,double dy){
-        if(button==1){view.yaw+=dx*.7f;view.pitch=Math.clamp(view.pitch+(float)dy*.5f,20,80);return true;}
+        if(button==1){if(hasShiftDown())view.roll=(view.roll+(float)dx*.7f)%360;else{view.yaw=(view.yaw+(float)dx*.7f)%360;view.pitch=(view.pitch+(float)dy*.7f)%360;}return true;}
         if(button==0&&inside(mx,my)){
             if(placing)pending=candidate(mx,my);
             else if(selected>=0&&pieces.get(selected).mounted()){var next=candidate(mx,my);if(next!=null){var old=pieces.get(selected);replaceSelected(next.orient(old.angle(),old.pitch(),old.roll()));}}
@@ -209,6 +215,7 @@ public final class CellEditor extends Screen {
         if(hasShiftDown())view.zoom=Math.clamp(view.zoom+(float)vertical*4,10,100);else resize(vertical*.1);return true;
     }
     @Override public boolean keyPressed(int key,int scan,int modifiers){
+        if(key==GLFW.GLFW_KEY_HOME){view.yaw=25;view.pitch=52;view.roll=0;return true;}
         if(key==GLFW.GLFW_KEY_R){rotate(hasShiftDown()?-15:15);return true;}
         if(key==GLFW.GLFW_KEY_S){symmetry=!symmetry;return true;}
         if(key==GLFW.GLFW_KEY_Z){history(false);return true;}

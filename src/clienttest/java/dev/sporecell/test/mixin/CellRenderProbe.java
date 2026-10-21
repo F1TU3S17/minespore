@@ -14,6 +14,10 @@ public abstract class CellRenderProbe {
     @Inject(method="render(Ldev/sporecell/CellEntity;FFLnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;I)V",at=@At("HEAD"),remap=false)
     private void rendered(CellEntity e,float yaw,float delta,MatrixStack m,VertexConsumerProvider v,int light,CallbackInfo ci) {
         if(MinecraftClient.getInstance().getCameraEntity()==e)WorldRenderTest.renderedFrames++;
+        if(CellClient.active&&CellClient.level>=6){
+            if(MinecraftClient.getInstance().getCameraEntity()==e){WorldRenderTest.playerFrames[CellClient.level]++;if(com.mojang.blaze3d.systems.RenderSystem.getShaderFogStart()>20*e.size())WorldRenderTest.fogFrames[CellClient.level]++;}
+            else if(!e.food()&&!e.scenery())WorldRenderTest.npcFrames[CellClient.level]++;
+        }
     }
     @Inject(method="shouldRender(Ldev/sporecell/CellEntity;Lnet/minecraft/client/render/Frustum;DDD)Z",at=@At("RETURN"),remap=false)
     private void culled(CellEntity e,Frustum f,double x,double y,double z,CallbackInfoReturnable<Boolean> ci) {

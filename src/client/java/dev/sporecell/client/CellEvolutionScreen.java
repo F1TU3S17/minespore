@@ -26,6 +26,7 @@ public final class CellEvolutionScreen extends Screen {
         int total=CellClient.plantFood+CellClient.animalFood;
         String diet=total==0?"Питание ещё не определено":CellClient.plantFood==0?"Хищная ветвь":CellClient.animalFood==0?"Травоядная ветвь":"Смешанное питание";
         draw.drawCenteredTextWithShadow(textRenderer,diet,width/2,54,0xF1D68A);
+        draw.drawCenteredTextWithShadow(textRenderer,"Открытые части: "+dev.sporecell.core.CellUnlocks.count(CellClient.unlocked)+" / 6",width/2,66,0xBDD5DC);
         int start=width/2-150,y=80;
         draw.fill(start,y,start+300,y+8,0xFF314E5A);
         draw.fill(start,y,start+300*CellClient.progress/1000,y+8,0xFF79D6B2);

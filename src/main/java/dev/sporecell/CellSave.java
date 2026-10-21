@@ -16,6 +16,7 @@ public final class CellSave extends PersistentState {
         public int progress=0,plantFood=0,animalFood=0;
         public int generation=0,lastBreedEaten=0;
         public List<EvolutionEvent> history=new ArrayList<>();
+        public Set<Part> unlocked=CellUnlocks.initial();
         public boolean started=false;
         public float health=Evolution.MAX_HEALTH;
         public boolean active=false;
@@ -40,6 +41,8 @@ public final class CellSave extends PersistentState {
                 Profile p=SporeCell.GSON.fromJson(players.getString(id),Profile.class);
                 p.blueprint.validate();
                 if(p.history==null)p.history=new ArrayList<>();
+                if(nbt.getInt("schema")<4||p.unlocked==null)p.unlocked=CellUnlocks.migrate(p.blueprint,p.progress);
+                p.unlocked.addAll(CellUnlocks.initial());p.blueprint.pieces().forEach(piece->p.unlocked.add(piece.part()));
                 if (p.dna<0 || p.generation<0 || p.eaten<0 || p.lastBreedEaten<0 || p.lastBreedEaten>p.eaten || p.history.size()>64 || p.progress<0 || p.progress>1000 || p.plantFood<0 || p.animalFood<0 || !Float.isFinite(p.health)) throw new IllegalArgumentException("Invalid progress");
                 save.profiles.put(UUID.fromString(id),p);
             } catch (RuntimeException e) { SporeCell.LOGGER.error("Cannot load cell profile {}",id,e); }
@@ -49,6 +52,6 @@ public final class CellSave extends PersistentState {
     @Override public NbtCompound writeNbt(NbtCompound nbt,RegistryWrapper.WrapperLookup lookup) {
         NbtCompound players=new NbtCompound();
         profiles.forEach((id,p)->players.putString(id.toString(),SporeCell.GSON.toJson(p)));
-        nbt.put("players",players); nbt.putInt("schema",3);nbt.putBoolean("dedicatedMode",dedicatedMode);nbt.putInt("environmentVersion",environmentVersion); return nbt;
+        nbt.put("players",players); nbt.putInt("schema",4);nbt.putBoolean("dedicatedMode",dedicatedMode);nbt.putInt("environmentVersion",environmentVersion); return nbt;
     }
 }

@@ -23,6 +23,9 @@ public final class CellClient implements ClientModInitializer {
     public static float health,targetHealth,targetDamage;
     public static int targetId=-1,targetLevel,targetSerial,targetFlash=-100;
     public static String message="";
+    public static Set<Part> unlocked=CellUnlocks.initial();
+    private static Part foundPart;
+    private static int foundSerial,foundAt=-1000;
     private static KeyBinding editor,evolution;
     private static int ticks,entityId=-1;
     @Override public void onInitializeClient() {
@@ -38,6 +41,12 @@ public final class CellClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(CellPackets.State.ID,(packet,context)->context.client().execute(()-> {
             JsonObject s=JsonParser.parseString(packet.json()).getAsJsonObject();
             active=s.get("active").getAsBoolean();editing=s.get("editing").getAsBoolean();
+            unlocked=EnumSet.noneOf(Part.class);for(var part:s.getAsJsonArray("unlocked"))unlocked.add(Part.valueOf(part.getAsString()));
+            if(s.has("discovery")&&!s.get("discovery").isJsonNull()){
+                var found=s.getAsJsonObject("discovery");int serial=found.get("serial").getAsInt();
+                if(foundSerial!=serial){foundSerial=serial;foundPart=Part.valueOf(found.get("part").getAsString());foundAt=ticks;
+                    context.client().getSoundManager().play(net.minecraft.client.sound.PositionedSoundInstance.master(net.minecraft.sound.SoundEvents.ENTITY_PLAYER_LEVELUP,1.3f));}
+            }
             entityId=s.get("entityId").getAsInt();
             if(!active && context.client().player!=null)context.client().setCameraEntity(context.client().player);
             generation=s.get("generation").getAsInt();mating=s.get("mating").getAsInt();mateId=s.get("mateId").getAsInt();breedNeeded=s.get("breedNeeded").getAsInt();
@@ -61,7 +70,7 @@ public final class CellClient implements ClientModInitializer {
                 context.client().setScreen(new CellEvolutionScreen());
             if(!active){MouseSteering.held=false;if(context.client().currentScreen==null)context.client().mouse.lockCursor();}
         }));
-        ClientPlayConnectionEvents.DISCONNECT.register((handler,client)-> { active=false;editing=false;message="";MouseSteering.held=false; });
+        ClientPlayConnectionEvents.DISCONNECT.register((handler,client)-> { active=false;editing=false;message="";MouseSteering.held=false;foundPart=null;foundSerial=0;unlocked=CellUnlocks.initial(); });
         ClientTickEvents.END_CLIENT_TICK.register(client-> {
             if(pendingDiet!=null && client.player!=null && ClientPlayNetworking.canSend(CellPackets.Action.ID)) {
                 JsonObject start=new JsonObject();start.addProperty("type","start");start.addProperty("diet",pendingDiet.name());send(start);pendingDiet=null;
@@ -86,6 +95,22 @@ public final class CellClient implements ClientModInitializer {
             if(!active||specs.isEmpty())return;
             var client=net.minecraft.client.MinecraftClient.getInstance();
             int y=draw.getScaledWindowHeight()-48;
+            if(client.currentScreen==null){
+                int known=CellUnlocks.count(unlocked);
+                draw.fill(8,8,162,37,0xC9102E38);
+                draw.drawText(client.textRenderer,"Части найдены: "+known+"/6",14,12,0xD9F5E8,false);
+                draw.drawText(client.textRenderer,eaten<5?"Съешьте пищи: "+Math.min(5,eaten)+"/5":known<6?"Ищите золотые фрагменты":"Растите и меняйте потомков",14,25,0xEAD27A,false);
+                if(foundPart!=null&&ticks-foundAt<120){
+                    int fx=draw.getScaledWindowWidth()-174;
+                    draw.fill(fx,45,draw.getScaledWindowWidth()-8,100,0xF02A4850);
+                    draw.drawText(client.textRenderer,"Новая часть!",fx+8,51,0xFFE38B,false);
+                    draw.drawText(client.textRenderer,CellEditor.NAMES.get(foundPart),fx+40,69,0xFFFFFF,false);
+                    draw.drawText(client.textRenderer,"Доступна в редакторе",fx+40,83,0xBDE5D3,false);
+                    var matrix=draw.getMatrices();matrix.push();matrix.translate(fx+22,83,200);matrix.scale(23,-23,23);
+                    matrix.multiply(net.minecraft.util.math.RotationAxis.POSITIVE_X.rotationDegrees(30));matrix.multiply(net.minecraft.util.math.RotationAxis.POSITIVE_Y.rotationDegrees(25));
+                    CellRenderer.renderDesign(new Blueprint(List.of(Blueprint.Piece.attachment(0,0,foundPart,0,0,0,0,1))),matrix,draw.getVertexConsumers());draw.draw();matrix.pop();
+                }
+            }
             draw.fill(8,y,260,y+40,0xC9102E38);
             draw.drawText(client.textRenderer,"ДНК "+dna+" · Уровень "+level+" · G: зов · V: эволюция",16,y+5,0xD9F5E8,false);
             double max=body.stats(specs).health();
@@ -96,15 +121,19 @@ public final class CellClient implements ClientModInitializer {
             draw.fill(140,y+20,140+(int)(110*progress/1000d),y+25,0xFFEAD27A);
             draw.drawText(client.textRenderer,"Рост "+progress+"/1000",140,y+29,0xD9F5E8,false);
             if(targetId>=0&&client.currentScreen==null){
-                int tx=draw.getScaledWindowWidth()/2-70;
-                draw.fill(tx,8,tx+140,39,0xD0253642);
+                int tx=draw.getScaledWindowWidth()-150;
+                draw.fill(tx,8,tx+140,45,0xD0253642);
                 draw.drawCenteredTextWithShadow(client.textRenderer,targetHealth<=0?"Противник побеждён":"Цель · уровень "+targetLevel,tx+70,12,0xFFD8BB);
                 draw.fill(tx+8,26,tx+132,31,0xFF4A4147);draw.fill(tx+8,26,tx+8+(int)(124*Math.clamp(targetHealth/6,0,1)),31,0xFFEF8679);
-                if(ticks-targetFlash<20)draw.drawText(client.textRenderer,String.format(Locale.ROOT,"−%.0f",targetDamage),tx+145,15,0xFFFFBA8E,false);
+                if(ticks-targetFlash<20)draw.drawText(client.textRenderer,String.format(Locale.ROOT,"−%.0f",targetDamage),tx+58,34,0xFFFFBA8E,false);
             }
             if(mating==0)draw.drawCenteredTextWithShadow(client.textRenderer,"Партнёр откликнулся на зов",draw.getScaledWindowWidth()/2,28,0xF0AFD5);
             if(mating==1)draw.drawCenteredTextWithShadow(client.textRenderer,"Размножение...",draw.getScaledWindowWidth()/2,28,0xF0AFD5);
-            if(!message.isEmpty()&&client.currentScreen==null)draw.drawCenteredTextWithShadow(client.textRenderer,message,draw.getScaledWindowWidth()/2,12,0xFFE7B7);
+            if(!message.isEmpty()&&client.currentScreen==null){
+                var lines=client.textRenderer.wrapLines(net.minecraft.text.Text.literal(message),Math.min(360,draw.getScaledWindowWidth()-24));
+                int messageY=draw.getScaledWindowHeight()-60-lines.size()*10;
+                for(var line:lines){draw.drawTextWithShadow(client.textRenderer,line,(draw.getScaledWindowWidth()-client.textRenderer.getWidth(line))/2,messageY,0xFFE7B7);messageY+=10;}
+            }
         });
     }
     public static void send(String type) { JsonObject o=new JsonObject();o.addProperty("type",type);send(o); }

@@ -19,6 +19,8 @@ import org.lwjgl.glfw.GLFW;
 public final class WorldRenderTest implements ClientModInitializer {
     public static int renderedFrames;
     public static boolean cullingAccepted;
+    public static final int[] playerFrames=new int[11],npcFrames=new int[11],fogFrames=new int[11];
+    private int scaleLevel=6;
     private int phase,ticks,modeTicks,phaseTicks;
     private final String tag=Long.toString(System.currentTimeMillis());
     private final long started=System.nanoTime();
@@ -58,9 +60,11 @@ public final class WorldRenderTest implements ClientModInitializer {
                         var profile=CellSave.get(client.getServer()).profile(player.getUuid());
                         profile.progress=200;profile.dna=Evolution.earnedDna(200);profile.eaten=5;profile.plantFood=dedicated?0:50;profile.animalFood=dedicated?50:0;
                         var controlled=(CellEntity)player.getCameraEntity();controlled.level(3);controlled.hurtCooldown=1000;
+                        CellDiscovery.drop((net.minecraft.server.world.ServerWorld)controlled.getWorld(),controlled.getX()+.2,controlled.getZ(),3,Part.POISON,false);
                     });
                 }
                 if(modeTicks==65){
+                    if(!CellClient.unlocked.contains(Part.POISON))throw new AssertionError("World discovery did not reach the client");screenshot(client,"discovery");
                     mouseStart=cell.getPos();
                     GLFW.glfwSetCursorPos(client.getWindow().getHandle(),client.getWindow().getWidth()*.82,client.getWindow().getHeight()*.5);
                     ((MouseInputProbe)client.mouse).sporetest$cursor(client.getWindow().getHandle(),client.getWindow().getWidth()*.82,client.getWindow().getHeight()*.5);
@@ -87,7 +91,8 @@ public final class WorldRenderTest implements ClientModInitializer {
                 screen.mouseClicked(screen.width/2d,screen.height-48,0);phase=4;
             }
             if(phase==4&&client.currentScreen instanceof CellEditor screen){
-                screen.choose(Part.EYE);
+                screen.mouseClicked(108,43+7*15+8,0);
+                screen.mouseClicked(70,43+3*15+7,0);
                 var point=screen.view.project(.2,.42,0);
                 screen.mouseClicked(point.x,point.y,0);screen.mouseReleased(point.x,point.y,0);
                 screen.mouseScrolled(point.x,point.y,0,5);screen.keyPressed(GLFW.GLFW_KEY_R,0,0);screen.keyPressed(GLFW.GLFW_KEY_R,0,0);
@@ -101,7 +106,7 @@ public final class WorldRenderTest implements ClientModInitializer {
             }
             if(phase==6&&CellClient.generation==1&&client.currentScreen==null){
                 var part=CellClient.body.pieces().getLast();
-                if(!part.mounted()||part.size()!=1.5||part.angle()!=30||CellClient.dna!=budget-3)throw new AssertionError("Offspring lost transforms or DNA");
+                if(!part.mounted()||part.size()!=1.5||part.angle()!=30||part.part()!=Part.POISON||CellClient.dna!=budget-10)throw new AssertionError("Offspring lost transforms or DNA");
                 phase=7;phaseTicks=0;
             }
             if(phase==7&&++phaseTicks==15){
@@ -128,7 +133,25 @@ public final class WorldRenderTest implements ClientModInitializer {
             if(phase==11&&++phaseTicks==3){
                 screenshot(client,"combat");
                 SporeCell.LOGGER.info("DEDICATED MODE TEST PASSED: LMB, mating, evolution, 3D editor, offspring, DNA, persistence, target health");
-                client.scheduleStop();phase=99;
+                phase=12;phaseTicks=0;
+            }
+            if(phase==12){
+                if(phaseTicks++==0){
+                    int level=scaleLevel;playerFrames[level]=npcFrames[level]=fogFrames[level]=0;
+                    client.getServer().execute(()->{
+                        var player=client.getServer().getPlayerManager().getPlayer(client.player.getUuid());
+                        var actor=(CellEntity)player.getCameraEntity();actor.level(level);actor.hurtCooldown=10000;
+                        CellSave.get(client.getServer()).profile(player.getUuid()).progress=(level-1)*100;
+                        var other=new CellEntity(SporeCell.CELL,actor.getWorld());other.kind(CellEntity.GRAZER);other.level(level);
+                        other.blueprint(CellSpecies.create(level,false));other.setPosition(actor.getX()+4*actor.size(),66.05,actor.getZ());actor.getWorld().spawnEntity(other);
+                    });
+                }
+                if(phaseTicks==70){
+                    if(playerFrames[scaleLevel]<5||npcFrames[scaleLevel]<5)throw new AssertionError("Level "+scaleLevel+" entities disappeared: player="+playerFrames[scaleLevel]+", NPC="+npcFrames[scaleLevel]);
+                    if(fogFrames[scaleLevel]<5)throw new AssertionError("Vanilla fog obscures high-level cell colors: "+scaleLevel);
+                    screenshot(client,"level-"+scaleLevel);
+                    if(++scaleLevel>10){SporeCell.LOGGER.info("HIGH LEVEL VISIBILITY TEST PASSED: player and NPC rendered on every level 6–10");client.scheduleStop();phase=99;}else phaseTicks=0;
+                }
             }
             if(phase==8&&!CellClient.active&&client.world!=null&&!client.world.getRegistryKey().equals(SporeCell.POND)){
                 if(client.getCameraEntity()!=client.player)throw new AssertionError("Vanilla camera not restored");

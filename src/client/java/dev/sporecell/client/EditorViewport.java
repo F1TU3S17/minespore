@@ -7,9 +7,9 @@ import java.util.List;
 
 /** One orthographic transform for rendering, projection and surface picking. */
 final class EditorViewport {
-    float yaw=25,pitch=52,zoom=44,centerX,centerY;
+    float yaw=25,pitch=52,roll,zoom=44,centerX,centerY;
     Matrix4f matrix() {return new Matrix4f().translation(centerX,centerY,150).scale(zoom,-zoom,zoom)
-        .rotateX((float)Math.toRadians(pitch)).rotateY((float)Math.toRadians(yaw));}
+        .rotateZ((float)Math.toRadians(roll)).rotateX((float)Math.toRadians(pitch)).rotateY((float)Math.toRadians(yaw));}
     Vector3f project(double x,double y,double z) {return matrix().transformPosition(new Vector3f((float)x,(float)y,(float)z));}
     record Hit(int index,Vector3f point,Vector3f normal,float distance) {}
     Vector3f[] ray(double mx,double my) {
