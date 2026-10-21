@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Import','Index','Decompile','Xrefs','Repair','Data','Define','Signatures')][string]$Mode='Index',
+    [ValidateSet('Import','Index','Decompile','Xrefs','Repair','Data','Define','Signatures','Resolve','EditorSignatures')][string]$Mode='Index',
     [string]$RequestFile,
     [string]$OutputName='index',
     [string]$SporeExecutable='D:/games/SPORE/SporebinEP1/SporeApp.exe',
@@ -25,7 +25,13 @@ if($Mode -eq 'Import') {
 } else {
     if(!(Test-Path -LiteralPath "$researchDatabase/SporeCell.gpr")) { throw 'Run -Mode Import once to create the persistent project.' }
     $researchArgs+=@('-process','SporeApp.exe','-noanalysis','-postScript')
-    if($Mode -eq 'Signatures') {
+    if($Mode -eq 'EditorSignatures') {
+        $researchArgs+=@('SporeEditorSignatures.java',"$researchEvidence/signatures.tsv")
+    }
+    elseif($Mode -eq 'Resolve') {
+        $researchArgs+=@('SporeResolveEditorTransforms.java',(Join-Path $researchProjectRoot 'docs/research/requests/editor-transform-resolved.txt'))
+    }
+    elseif($Mode -eq 'Signatures') {
         $researchArgs+=@('SporeVerifiedCellSignatures.java',"$researchEvidence/signatures.tsv")
     }
     elseif($Mode -eq 'Define') {

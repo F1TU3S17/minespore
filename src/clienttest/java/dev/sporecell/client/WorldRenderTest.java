@@ -1,6 +1,8 @@
 package dev.sporecell.client;
 
 import dev.sporecell.*;
+import dev.sporecell.core.*;
+import dev.sporecell.test.mixin.MouseInputProbe;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.gui.screen.TitleScreen;
@@ -11,107 +13,135 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.*;
 import net.minecraft.world.gen.*;
 import net.minecraft.world.level.LevelInfo;
+import org.lwjgl.glfw.GLFW;
 
-/** End-to-end visual smoke test in an isolated, newly created single-player save. */
+/** Full real-client flow: keyboard, LMB steering, mating, evolution, transformed offspring and persistence. */
 public final class WorldRenderTest implements ClientModInitializer {
     public static int renderedFrames;
     public static boolean cullingAccepted;
-    private int phase,ticks,modeTicks;
-    private int returnTicks;
-    private final String imageTag=Long.toString(System.currentTimeMillis());
+    private int phase,ticks,modeTicks,phaseTicks;
+    private final String tag=Long.toString(System.currentTimeMillis());
     private final long started=System.nanoTime();
-    private Vec3d start;
-    private int initialDna;
+    private Vec3d start,mouseStart;
+    private int budget;
     private final boolean dedicated=Boolean.getBoolean("sporecell.test.dedicated");
-    @Override public void onInitializeClient() {
+    @Override public void onInitializeClient(){
         if(!Boolean.getBoolean("sporecell.test.world"))return;
-        ClientTickEvents.END_CLIENT_TICK.register(client-> {
-            if((System.nanoTime()-started)/1e9>240)throw new AssertionError("World visual test timed out at phase "+phase+", mode tick "+modeTicks);
+        ClientTickEvents.END_CLIENT_TICK.register(client->{
+            if((System.nanoTime()-started)/1e9>240)throw new AssertionError("Client scenario timed out: phase "+phase+", tick "+modeTicks);
             if(client.getOverlay()!=null)return;
-            if(phase==0 && ++ticks==20) {
-                phase=1;
-                client.options.getViewDistance().setValue(4);client.options.getSimulationDistance().setValue(5);client.options.getMaxFps().setValue(60);
-                if(dedicated) {
-                    // A fresh development profile may still show vanilla accessibility onboarding.
+            if(phase==0&&++ticks==20){
+                phase=1;client.options.getViewDistance().setValue(4);client.options.getSimulationDistance().setValue(5);client.options.getMaxFps().setValue(60);
+                if(dedicated){
                     if(!(client.currentScreen instanceof TitleScreen))client.setScreen(new TitleScreen());
                     var button=net.fabricmc.fabric.api.client.screen.v1.Screens.getButtons(client.currentScreen).stream()
-                        .filter(b->b.getMessage().getString().equals("Spore: стадия клетки")).findFirst().orElseThrow(()->new AssertionError("Missing dedicated mode title button"));
+                        .filter(b->b.getMessage().getString().equals("Spore: стадия клетки")).findFirst().orElseThrow();
                     ((net.minecraft.client.gui.widget.ButtonWidget)button).onPress();
-                    if(!(client.currentScreen instanceof CellModeScreen menu))throw new AssertionError("Mode selection did not open");
-                    menu.mouseClicked(menu.width/2d,menu.height/2d+3,0);
-                } else {
-                    LevelInfo info=new LevelInfo("Cell visual test",GameMode.CREATIVE,false,Difficulty.PEACEFUL,true,new GameRules(),DataConfiguration.SAFE_MODE);
+                    var menu=(CellModeScreen)client.currentScreen;menu.mouseClicked(menu.width/2d,menu.height/2d+3,0);
+                }else{
+                    var info=new LevelInfo("Cell visual test",GameMode.CREATIVE,false,Difficulty.PEACEFUL,true,new GameRules(),DataConfiguration.SAFE_MODE);
                     client.createIntegratedServerLoader().createAndStart("cell-qa-"+System.currentTimeMillis(),info,new GeneratorOptions(42L,false,false),
                         registry->registry.get(RegistryKeys.WORLD_PRESET).get(WorldPresets.FLAT).createDimensionsRegistryHolder(),new TitleScreen());
                 }
             }
-            if(phase==1 && client.player!=null && client.world!=null) {
+            if(phase==1&&client.player!=null&&client.world!=null){
                 if(!dedicated)client.player.networkHandler.sendChatCommand("cell enter");phase=2;
             }
-            if(phase==2 && CellClient.active && client.getCameraEntity() instanceof CellEntity cell) {
+            if(phase==2&&CellClient.active&&client.getCameraEntity() instanceof CellEntity cell){
                 modeTicks++;
-                if(modeTicks==10) { start=cell.getPos();client.options.forwardKey.setPressed(true); }
+                if(modeTicks==10){start=cell.getPos();client.options.forwardKey.setPressed(true);}
                 if(modeTicks==40)client.options.forwardKey.setPressed(false);
-                if(modeTicks==50)client.getServer().execute(()-> {
-                    var profile=CellSave.get(client.getServer()).profile(client.player.getUuid());
-                    var controlled=(CellEntity)client.getServer().getPlayerManager().getPlayer(client.player.getUuid()).getCameraEntity();
-                    controlled.level(3);
-                    profile.progress=200;profile.dna=dev.sporecell.core.Evolution.earnedDna(200);
+                if(modeTicks==50){
+                    if(cell.getZ()>=start.z-.2||renderedFrames==0||PondRenderer.renderedFrames==0)throw new AssertionError("Keyboard or world render failed");
+                    client.getServer().execute(()->{
+                        var player=client.getServer().getPlayerManager().getPlayer(client.player.getUuid());
+                        var profile=CellSave.get(client.getServer()).profile(player.getUuid());
+                        profile.progress=200;profile.dna=Evolution.earnedDna(200);profile.eaten=5;profile.plantFood=dedicated?0:50;profile.animalFood=dedicated?50:0;
+                        var controlled=(CellEntity)player.getCameraEntity();controlled.level(3);controlled.hurtCooldown=1000;
+                    });
+                }
+                if(modeTicks==65){
+                    mouseStart=cell.getPos();
+                    GLFW.glfwSetCursorPos(client.getWindow().getHandle(),client.getWindow().getWidth()*.82,client.getWindow().getHeight()*.5);
+                    ((MouseInputProbe)client.mouse).sporetest$cursor(client.getWindow().getHandle(),client.getWindow().getWidth()*.82,client.getWindow().getHeight()*.5);
+                    client.getServer().execute(()->{
+                        var world=client.getServer().getWorld(SporeCell.POND);
+                        var removed=new java.util.ArrayList<CellEntity>();
+                        for(var entity:world.iterateEntities())if(entity instanceof CellEntity other&&other.owner==null&&other.kind()<CellEntity.MATE)removed.add(other);
+                        removed.forEach(CellEntity::discard);
+                    });
+                }
+                if(modeTicks==67)((MouseInputProbe)client.mouse).sporetest$button(client.getWindow().getHandle(),0,GLFW.GLFW_PRESS,0);
+                if(modeTicks==80)SporeCell.LOGGER.info("Mouse diagnostics: held={}, locked={}, cursor={}/{}, direction={}, start={}, current={}",MouseSteering.held,client.mouse.isCursorLocked(),client.mouse.getX(),client.mouse.getY(),MouseSteering.direction(client,cell),mouseStart,cell.getPos());
+                if(modeTicks==100){
+                    ((MouseInputProbe)client.mouse).sporetest$button(client.getWindow().getHandle(),0,GLFW.GLFW_RELEASE,0);
+                    if(cell.getX()<=mouseStart.x+.2||client.mouse.isCursorLocked())throw new AssertionError("Holding LMB did not steer right with an unlocked cursor");
+                }
+                if(modeTicks==110){
+                    screenshot(client,"world");budget=CellClient.dna;
+                    net.minecraft.client.option.KeyBinding.onKeyPressed(net.minecraft.client.util.InputUtil.Type.KEYSYM.createFromCode(GLFW.GLFW_KEY_G));phase=3;phaseTicks=0;
+                }
+            }
+            if(phase==3&&client.currentScreen instanceof CellEvolutionScreen screen&&CellClient.mating==2&&++phaseTicks>=6){
+                screenshot(client,"evolution");
+                screen.mouseClicked(screen.width/2d,screen.height-48,0);phase=4;
+            }
+            if(phase==4&&client.currentScreen instanceof CellEditor screen){
+                screen.choose(Part.EYE);
+                var point=screen.view.project(.2,.42,0);
+                screen.mouseClicked(point.x,point.y,0);screen.mouseReleased(point.x,point.y,0);
+                screen.mouseScrolled(point.x,point.y,0,5);screen.keyPressed(GLFW.GLFW_KEY_R,0,0);screen.keyPressed(GLFW.GLFW_KEY_R,0,0);
+                screen.draft().validate();
+                if(screen.draft().pieces().size()!=4||screen.draft().pieces().getLast().size()!=1.5)throw new AssertionError("3D editor did not create a transformed attachment");
+                phase=5;phaseTicks=0;
+            }
+            if(phase==5&&++phaseTicks==8&&client.currentScreen instanceof CellEditor screen){
+                screenshot(client,"editor-3d");
+                screen.mouseClicked(screen.width/2d-56,screen.height-18,0);phase=6;
+            }
+            if(phase==6&&CellClient.generation==1&&client.currentScreen==null){
+                var part=CellClient.body.pieces().getLast();
+                if(!part.mounted()||part.size()!=1.5||part.angle()!=30||CellClient.dna!=budget-3)throw new AssertionError("Offspring lost transforms or DNA");
+                phase=7;phaseTicks=0;
+            }
+            if(phase==7&&++phaseTicks==15){
+                screenshot(client,"offspring");
+                client.getServer().execute(()->{
+                    var player=client.getServer().getPlayerManager().getPlayer(client.player.getUuid());var save=CellSave.get(client.getServer());
+                    var restored=CellSave.TYPE.deserializer().apply(save.writeNbt(new net.minecraft.nbt.NbtCompound(),player.getRegistryManager()),player.getRegistryManager()).profile(player.getUuid());
+                    if(restored.generation!=1||restored.history.size()!=1||restored.blueprint.pieces().getLast().size()!=1.5)throw new AssertionError("Persistent offspring data is incomplete");
+                    if(dedicated){
+                        if(!save.dedicatedMode||!restored.blueprint.stats(Parts.SPECS).carnivore())throw new AssertionError("Dedicated carnivore mode was lost");
+                        CellGame.leave(player);if(!save.profile(player.getUuid()).active)throw new AssertionError("Dedicated mode escaped");
+                        var actor=(CellEntity)player.getCameraEntity();actor.setPosition(0,66,0);actor.setYaw(0);actor.setVelocity(Vec3d.ZERO);
+                        var prey=new CellEntity(SporeCell.CELL,actor.getWorld());prey.kind(CellEntity.GRAZER);prey.level(actor.level());
+                        prey.blueprint(new Blueprint(java.util.List.of(new Blueprint.Piece(0,0,Part.CORE,0))));
+                        prey.setPosition(0,66,-1.35*actor.size());actor.getWorld().spawnEntity(prey);
+                    }
                 });
-                if(modeTicks==65) {
-                    SporeCell.LOGGER.info("Render diagnostics: frames={}, culling={}, thirdPerson={}, {}",renderedFrames,cullingAccepted,
-                            client.gameRenderer.getCamera().isThirdPerson(),client.worldRenderer.getEntitiesDebugString());
-                    if(PondRenderer.renderedFrames==0)throw new AssertionError("Microscopic water backdrop never rendered");
-                    if(renderedFrames==0)throw new AssertionError("Controlled cell was never rendered; culling="+cullingAccepted);
-                    if(cell.getZ()>=start.z-.2 || Math.abs(client.gameRenderer.getCamera().getYaw()-180)>.01)throw new AssertionError("W must move up the screen with a north-facing camera");
-                    if(cell.getPos().squaredDistanceTo(start)<.1)throw new AssertionError("Client WASD input did not move the cell");
-                    ScreenshotRecorder.saveScreenshot(client.runDirectory,"cell-world-"+imageTag+".png",client.getFramebuffer(),t->SporeCell.LOGGER.info("World screenshot: {}",t.getString()));
-                }
-                if(modeTicks==80) {
-                    initialDna=CellClient.dna;
-                    net.minecraft.client.option.KeyBinding.onKeyPressed(net.minecraft.client.util.InputUtil.Type.KEYSYM.createFromCode(org.lwjgl.glfw.GLFW.GLFW_KEY_G));
-                }
-                if(modeTicks==100) {
-                    if(!(client.currentScreen instanceof CellEditor screen))throw new AssertionError("Network action did not open editor");
-                    int step=Math.max(8,Math.min(27,Math.min((screen.height-96)/9,(screen.width-270)/9)));
-                    screen.mouseClicked(132+5*step+step/2d,46+4*step+step/2d,0);
-                    screen.mouseClicked(screen.width/2d-56,screen.height-19,0);
-                }
-                if(modeTicks==98)ScreenshotRecorder.saveScreenshot(client.runDirectory,"cell-editor-world-"+imageTag+".png",client.getFramebuffer(),t->SporeCell.LOGGER.info("Editor model screenshot: {}",t.getString()));
-                if(modeTicks==135) {
-                    if(client.currentScreen instanceof CellEditor || CellClient.body.pieces().size()!=4 || CellClient.dna!=initialDna-2)
-                        throw new AssertionError("Editor changes did not return to the world with the correct DNA budget");
-                    ScreenshotRecorder.saveScreenshot(client.runDirectory,"cell-evolved-"+imageTag+".png",client.getFramebuffer(),t->SporeCell.LOGGER.info("Evolved screenshot: {}",t.getString()));
-                }
-                if(modeTicks==160) {
-                    if(dedicated) {
-                        client.getServer().execute(()-> {
-                            var save=CellSave.get(client.getServer());
-                            if(!save.dedicatedMode)throw new AssertionError("Dedicated mode was not persisted");
-                            var player=client.getServer().getPlayerManager().getPlayer(client.player.getUuid());
-                            CellGame.leave(player);
-                            if(!save.profile(player.getUuid()).active)throw new AssertionError("Dedicated cell mode escaped into vanilla");
-                            var restored=CellSave.TYPE.deserializer().apply(save.writeNbt(new net.minecraft.nbt.NbtCompound(),player.getRegistryManager()),player.getRegistryManager()).profile(player.getUuid());
-                            if(restored.progress<200||restored.blueprint.pieces().size()!=4||!restored.blueprint.stats(Parts.SPECS).carnivore())throw new AssertionError("Dedicated save lost evolution or carnivore branch");
-                            SporeCell.LOGGER.info("DEDICATED CELL MODE TEST PASSED: branch, editor, isolated mode and persistence");
-                            client.execute(client::scheduleStop);
-                        });phase=5;
-                    } else {client.player.networkHandler.sendChatCommand("cell leave");phase=3;}
-                }
+                if(dedicated){phase=10;phaseTicks=0;}else{client.player.networkHandler.sendChatCommand("cell leave");phase=8;}
             }
-            if(phase==3 && !CellClient.active && client.currentScreen==null && client.world!=null
-                    && !client.world.getRegistryKey().equals(SporeCell.POND)) {
-                if(client.getCameraEntity()!=client.player)throw new AssertionError("Leaving did not restore camera");
-                net.minecraft.client.option.KeyBinding.onKeyPressed(net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper.getBoundKeyOf(client.options.inventoryKey));
-                phase=4;
+            if(phase==10){
+                if(++phaseTicks>100)throw new AssertionError("Attack target health was not synchronized");
+                if(CellClient.targetId>=0&&CellClient.targetHealth<6){phase=11;phaseTicks=0;}
             }
-            if(phase==4 && ++returnTicks==10) {
-                if(!(client.currentScreen instanceof net.minecraft.client.gui.screen.ingame.InventoryScreen)
-                        && !(client.currentScreen instanceof net.minecraft.client.gui.screen.ingame.CreativeInventoryScreen))
-                    throw new AssertionError("Vanilla inventory binding stopped working after cell mode: "+client.currentScreen);
-                SporeCell.LOGGER.info("WORLD VISUAL TEST PASSED: movement, rendered cell, editor hotkey, DNA, return and vanilla inventory");
-                client.setScreen(null);client.scheduleStop();phase=5;
+            if(phase==11&&++phaseTicks==3){
+                screenshot(client,"combat");
+                SporeCell.LOGGER.info("DEDICATED MODE TEST PASSED: LMB, mating, evolution, 3D editor, offspring, DNA, persistence, target health");
+                client.scheduleStop();phase=99;
+            }
+            if(phase==8&&!CellClient.active&&client.world!=null&&!client.world.getRegistryKey().equals(SporeCell.POND)){
+                if(client.getCameraEntity()!=client.player)throw new AssertionError("Vanilla camera not restored");
+                net.minecraft.client.option.KeyBinding.onKeyPressed(net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper.getBoundKeyOf(client.options.inventoryKey));phase=9;phaseTicks=0;
+            }
+            if(phase==9&&++phaseTicks==10){
+                if(!(client.currentScreen instanceof net.minecraft.client.gui.screen.ingame.CreativeInventoryScreen)&&!(client.currentScreen instanceof net.minecraft.client.gui.screen.ingame.InventoryScreen))throw new AssertionError("Vanilla inventory broken after cell mode");
+                SporeCell.LOGGER.info("WORLD TEST PASSED: keyboard, LMB, mating, evolution, 3D editor, offspring, persistence, vanilla return");
+                client.setScreen(null);client.scheduleStop();phase=99;
             }
         });
+    }
+    private void screenshot(net.minecraft.client.MinecraftClient client,String name){
+        ScreenshotRecorder.saveScreenshot(client.runDirectory,"cell-"+name+"-"+tag+".png",client.getFramebuffer(),t->SporeCell.LOGGER.info("Scenario screenshot: {}",t.getString()));
     }
 }

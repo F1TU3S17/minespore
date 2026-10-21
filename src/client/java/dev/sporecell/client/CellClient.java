@@ -17,11 +17,13 @@ public final class CellClient implements ClientModInitializer {
     public static boolean active,editing;
     public static Blueprint body=Blueprint.starter();
     public static Map<Part,PartSpec> specs=new EnumMap<>(Part.class);
-    public static int dna,revision,eaten,deaths,progress,level=1;
+    public static int dna,revision,eaten,deaths,progress,level=1,generation,mating=-1,mateId=-1,breedNeeded=5,plantFood,animalFood;
+    public static java.util.List<CellSave.EvolutionEvent> history=new ArrayList<>();
     static Evolution.Diet pendingDiet;
-    public static float health;
+    public static float health,targetHealth,targetDamage;
+    public static int targetId=-1,targetLevel,targetSerial,targetFlash=-100;
     public static String message="";
-    private static KeyBinding editor;
+    private static KeyBinding editor,evolution;
     private static int ticks,entityId=-1;
     @Override public void onInitializeClient() {
         net.fabricmc.fabric.api.client.screen.v1.ScreenEvents.AFTER_INIT.register((client,screen,w,h)-> {
@@ -32,22 +34,34 @@ public final class CellClient implements ClientModInitializer {
         PondRenderer.register();
         EntityRendererRegistry.register(SporeCell.CELL,CellRenderer::new);
         editor=KeyBindingHelper.registerKeyBinding(new KeyBinding("key.sporecell.editor",InputUtil.Type.KEYSYM,GLFW.GLFW_KEY_G,"category.sporecell"));
+        evolution=KeyBindingHelper.registerKeyBinding(new KeyBinding("key.sporecell.evolution",InputUtil.Type.KEYSYM,GLFW.GLFW_KEY_V,"category.sporecell"));
         ClientPlayNetworking.registerGlobalReceiver(CellPackets.State.ID,(packet,context)->context.client().execute(()-> {
             JsonObject s=JsonParser.parseString(packet.json()).getAsJsonObject();
             active=s.get("active").getAsBoolean();editing=s.get("editing").getAsBoolean();
             entityId=s.get("entityId").getAsInt();
             if(!active && context.client().player!=null)context.client().setCameraEntity(context.client().player);
+            generation=s.get("generation").getAsInt();mating=s.get("mating").getAsInt();mateId=s.get("mateId").getAsInt();breedNeeded=s.get("breedNeeded").getAsInt();
+            plantFood=s.get("plantFood").getAsInt();animalFood=s.get("animalFood").getAsInt();
+            history=new ArrayList<>();for(var event:s.getAsJsonArray("history"))history.add(SporeCell.GSON.fromJson(event,CellSave.EvolutionEvent.class));
             progress=s.get("progress").getAsInt();level=s.get("level").getAsInt();
             dna=s.get("dna").getAsInt();health=s.get("health").getAsFloat();revision=s.get("revision").getAsInt();
             eaten=s.get("eaten").getAsInt();deaths=s.get("deaths").getAsInt();message=s.get("message").getAsString();
+            if(s.has("target")&&!s.get("target").isJsonNull()){
+                var target=s.getAsJsonObject("target");targetId=target.get("id").getAsInt();targetLevel=target.get("level").getAsInt();targetHealth=target.get("health").getAsFloat();targetDamage=target.get("damage").getAsFloat();
+                int serial=target.get("serial").getAsInt();if(serial!=targetSerial){targetSerial=serial;targetFlash=ticks;}
+            }else targetId=-1;
             body=SporeCell.GSON.fromJson(s.get("body"),Blueprint.class);
             EnumMap<Part,PartSpec> map=new EnumMap<>(Part.class);
             for(Part p:Part.values())map.put(p,SporeCell.GSON.fromJson(s.getAsJsonObject("specs").get(p.name()),PartSpec.class));
             specs=map;
             if(s.get("editor").getAsBoolean() && !(context.client().currentScreen instanceof CellEditor))context.client().setScreen(new CellEditor());
             else if(!editing && context.client().currentScreen instanceof CellEditor)context.client().setScreen(null);
+            if(mating<0&&context.client().currentScreen instanceof CellEvolutionScreen screen&&screen.offspring)context.client().setScreen(null);
+            if(s.get("evolution").getAsBoolean() && !(context.client().currentScreen instanceof CellEditor) && !(context.client().currentScreen instanceof CellEvolutionScreen))
+                context.client().setScreen(new CellEvolutionScreen());
+            if(!active){MouseSteering.held=false;if(context.client().currentScreen==null)context.client().mouse.lockCursor();}
         }));
-        ClientPlayConnectionEvents.DISCONNECT.register((handler,client)-> { active=false;editing=false;message=""; });
+        ClientPlayConnectionEvents.DISCONNECT.register((handler,client)-> { active=false;editing=false;message="";MouseSteering.held=false; });
         ClientTickEvents.END_CLIENT_TICK.register(client-> {
             if(pendingDiet!=null && client.player!=null && ClientPlayNetworking.canSend(CellPackets.Action.ID)) {
                 JsonObject start=new JsonObject();start.addProperty("type","start");start.addProperty("diet",pendingDiet.name());send(start);pendingDiet=null;
@@ -55,12 +69,16 @@ public final class CellClient implements ClientModInitializer {
             if(!active || client.player==null)return;
             if(client.world!=null && client.world.getEntityById(entityId) instanceof CellEntity cell && client.getCameraEntity()!=cell)
                 client.setCameraEntity(cell);
-            while(editor.wasPressed()) if(client.currentScreen==null)send("editor");
+            if(client.mouse.isCursorLocked())client.mouse.unlockCursor();
+            if(client.currentScreen!=null)MouseSteering.held=false;
+            while(editor.wasPressed())if(client.currentScreen==null)send("mate");
+            while(evolution.wasPressed())if(client.currentScreen==null)client.setScreen(new CellEvolutionScreen());
             if(++ticks%2!=0)return;
             double x=0,z=0;
             if(client.currentScreen==null) {
                 x=(client.options.rightKey.isPressed()?1:0)-(client.options.leftKey.isPressed()?1:0);
                 z=(client.options.backKey.isPressed()?1:0)-(client.options.forwardKey.isPressed()?1:0);
+                if(MouseSteering.held&&client.getCameraEntity() instanceof CellEntity cell){var direction=MouseSteering.direction(client,cell);x=direction.x;z=direction.z;}
             }
             JsonObject action=new JsonObject();action.addProperty("type","move");action.addProperty("x",x);action.addProperty("z",z);send(action);
         });
@@ -69,7 +87,7 @@ public final class CellClient implements ClientModInitializer {
             var client=net.minecraft.client.MinecraftClient.getInstance();
             int y=draw.getScaledWindowHeight()-48;
             draw.fill(8,y,260,y+40,0xC9102E38);
-            draw.drawText(client.textRenderer,"ДНК "+dna+" · Уровень "+level+" · G: редактор",16,y+5,0xD9F5E8,false);
+            draw.drawText(client.textRenderer,"ДНК "+dna+" · Уровень "+level+" · G: зов · V: эволюция",16,y+5,0xD9F5E8,false);
             double max=body.stats(specs).health();
             draw.fill(16,y+20,106,y+25,0xFF34464E);
             draw.fill(16,y+20,16+(int)(90*Math.max(0,health)/max),y+25,0xFF71D9B5);
@@ -77,6 +95,15 @@ public final class CellClient implements ClientModInitializer {
             draw.fill(140,y+20,250,y+25,0xFF34464E);
             draw.fill(140,y+20,140+(int)(110*progress/1000d),y+25,0xFFEAD27A);
             draw.drawText(client.textRenderer,"Рост "+progress+"/1000",140,y+29,0xD9F5E8,false);
+            if(targetId>=0&&client.currentScreen==null){
+                int tx=draw.getScaledWindowWidth()/2-70;
+                draw.fill(tx,8,tx+140,39,0xD0253642);
+                draw.drawCenteredTextWithShadow(client.textRenderer,targetHealth<=0?"Противник побеждён":"Цель · уровень "+targetLevel,tx+70,12,0xFFD8BB);
+                draw.fill(tx+8,26,tx+132,31,0xFF4A4147);draw.fill(tx+8,26,tx+8+(int)(124*Math.clamp(targetHealth/6,0,1)),31,0xFFEF8679);
+                if(ticks-targetFlash<20)draw.drawText(client.textRenderer,String.format(Locale.ROOT,"−%.0f",targetDamage),tx+145,15,0xFFFFBA8E,false);
+            }
+            if(mating==0)draw.drawCenteredTextWithShadow(client.textRenderer,"Партнёр откликнулся на зов",draw.getScaledWindowWidth()/2,28,0xF0AFD5);
+            if(mating==1)draw.drawCenteredTextWithShadow(client.textRenderer,"Размножение...",draw.getScaledWindowWidth()/2,28,0xF0AFD5);
             if(!message.isEmpty()&&client.currentScreen==null)draw.drawCenteredTextWithShadow(client.textRenderer,message,draw.getScaledWindowWidth()/2,12,0xFFE7B7);
         });
     }

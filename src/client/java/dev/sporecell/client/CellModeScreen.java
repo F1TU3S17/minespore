@@ -33,7 +33,7 @@ final class CellModeScreen extends Screen {
         draw.fill(0,0,width,height,0xFF102A35);
         draw.drawCenteredTextWithShadow(textRenderer,"SPORE · СТАДИЯ КЛЕТКИ",width/2,35,0x95E5C9);
         draw.drawCenteredTextWithShadow(textRenderer,"Отдельный мир и собственная эволюция",width/2,55,0xD4E8EB);
-        draw.drawCenteredTextWithShadow(textRenderer,"Всеядность открывается по мере роста. Редактор: G",width/2,height/2-52,0xD4E8EB);
+        draw.drawCenteredTextWithShadow(textRenderer,"G — брачный зов · V — эволюция · ЛКМ — плыть",width/2,height/2-52,0xD4E8EB);
         super.render(draw,mx,my,delta);
     }
     @Override public void close() {client.setScreen(parent);}

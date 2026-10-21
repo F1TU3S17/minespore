@@ -16,6 +16,9 @@ import net.minecraft.world.GameMode;
 import java.util.*;
 
 public final class CellGame {
+    private record CombatTarget(int id,int level,float health,float damage,int serial,int until){}
+    private static final Map<UUID,CombatTarget> TARGETS=new HashMap<>();
+    private static int attackSerial;
     private static final Map<UUID,CellEntity> ACTIVE=new HashMap<>();
     private static final Set<UUID> EDITING=new HashSet<>();
     private static final Map<UUID,Long> LAST_EDIT=new HashMap<>();
@@ -47,11 +50,12 @@ public final class CellGame {
         ACTIVE.put(player.getUuid(),cell);
         player.teleport(world,0,PLANE+2,0,0,0); player.changeGameMode(GameMode.SPECTATOR); player.setCameraEntity(cell);
         save.markDirty();populate(world); sync(player,false,"");
-        player.sendMessage(Text.literal("WASD — плавание · G — редактор клетки"),true);
+        player.sendMessage(Text.literal("ЛКМ — плыть к курсору · G — брачный зов · V — эволюция"),true);
     }
     public static void leave(ServerPlayerEntity player) {
         CellSave save=CellSave.get(player.getServer()); CellSave.Profile p=save.profile(player.getUuid());
         if(!p.active) return;
+        CellReproduction.cancel(player.getUuid());
         if(save.dedicatedMode){player.sendMessage(Text.literal("Это мир стадии клетки. Чтобы закончить игру, выберите «Сохранить и выйти» в меню паузы."));return;}
         CellEntity cell=ACTIVE.remove(player.getUuid());
         if(cell!=null) { p.health=cell.health();cell.discard(); }
@@ -63,13 +67,17 @@ public final class CellGame {
         p.active=false; save.markDirty(); sync(player,false,"");
     }
     public static void disconnect(ServerPlayerEntity player) {
+        CellReproduction.cancel(player.getUuid());TARGETS.remove(player.getUuid());
         CellEntity cell=ACTIVE.remove(player.getUuid());
         if(cell!=null) {
             CellSave save=CellSave.get(player.getServer());save.profile(player.getUuid()).health=cell.health();save.markDirty();cell.discard();
         }
         EDITING.remove(player.getUuid());LAST_EDIT.remove(player.getUuid());
     }
+    static CellEntity controlled(ServerPlayerEntity player){return ACTIVE.get(player.getUuid());}
+    static void protect(UUID id,boolean protect){if(protect)EDITING.add(id);else EDITING.remove(id);}
     public static void openEditor(ServerPlayerEntity player) {
+        if(!CellReproduction.ready(player.getUuid())){sync(player,false,"Редактор доступен после размножения. Брачный зов: G.");return;}
         CellEntity cell=ACTIVE.get(player.getUuid()); if(cell==null) return;
         EDITING.add(player.getUuid());cell.inputX=cell.inputZ=0;cell.setVelocity(Vec3d.ZERO);sync(player,true,"");
     }
@@ -90,9 +98,10 @@ public final class CellGame {
                 if(!Double.isFinite(x)||!Double.isFinite(z)) return;
                 cell.inputX=MathHelper.clamp(x,-1,1);cell.inputZ=MathHelper.clamp(z,-1,1);cell.inputAge=0;return;
             }
+            if(type.equals("mate")){CellReproduction.call(player);return;}
             if(type.equals("editor")) { openEditor(player);return; }
-            if(type.equals("close")) { EDITING.remove(player.getUuid());sync(player,false,"");return; }
-            if(!type.equals("apply") || !EDITING.contains(player.getUuid())) return;
+            if(type.equals("close")) { CellReproduction.cancel(player.getUuid());EDITING.remove(player.getUuid());sync(player,false,"");return; }
+            if(!type.equals("apply") || !EDITING.contains(player.getUuid()) || !CellReproduction.ready(player.getUuid())) return;
             long now=player.getServerWorld().getTime();
             if(now-LAST_EDIT.getOrDefault(player.getUuid(),-100L)<5) return;
             LAST_EDIT.put(player.getUuid(),now);
@@ -107,24 +116,35 @@ public final class CellGame {
             double oldMax=p.blueprint.stats(Parts.SPECS).health(),newMax=next.stats(Parts.SPECS).health();
             p.health=(float)Math.min(newMax,cell.health()+Math.max(0,newMax-oldMax));
             p.dna-=cost;p.blueprint=next;p.revision++;cell.blueprint(next);cell.health(p.health);
-            save.markDirty();EDITING.remove(player.getUuid());sync(player,false,"Изменения клетки сохранены");
+            CellReproduction.finish(player);cell.inputX=cell.inputZ=0;
+            save.markDirty();EDITING.remove(player.getUuid());sync(player,false,"Новое поколение: "+p.generation+". Конструкция потомка сохранена.");
         } catch(RuntimeException e) { sync(player,true,"Недопустимая конструкция: "+e.getMessage()); }
     }
-    private static void sync(ServerPlayerEntity player,boolean editor,String message) {
+    static void sync(ServerPlayerEntity player,boolean editor,String message) {
         CellSave.Profile p=CellSave.get(player.getServer()).profile(player.getUuid());
         JsonObject state=new JsonObject();state.addProperty("active",p.active);state.addProperty("editor",editor);
         state.addProperty("editing",EDITING.contains(player.getUuid()));
         CellEntity controlled=ACTIVE.get(player.getUuid());state.addProperty("entityId",controlled==null?-1:controlled.getId());
         state.addProperty("dna",p.dna);state.addProperty("health",p.health);state.addProperty("revision",p.revision);
         state.addProperty("eaten",p.eaten);state.addProperty("deaths",p.deaths);state.addProperty("message",message);
+        state.addProperty("generation",p.generation);state.add("history",SporeCell.GSON.toJsonTree(p.history));
+        state.addProperty("mating",CellReproduction.phase(player.getUuid()));state.addProperty("mateId",CellReproduction.partnerId(player.getUuid()));
+        state.addProperty("breedNeeded",CellReproduction.foodNeeded(p));state.addProperty("evolution",CellReproduction.ready(player.getUuid()));
         state.addProperty("progress",p.progress);state.addProperty("level",Evolution.level(p.progress));
         state.addProperty("plantFood",p.plantFood);state.addProperty("animalFood",p.animalFood);
         var capabilities=p.blueprint.stats(Parts.SPECS);
         state.addProperty("diet",Evolution.diet(capabilities.herbivore(),capabilities.carnivore()).name());
+        var target=TARGETS.get(player.getUuid());
+        if(target!=null&&target.until()>player.getServer().getTicks()){
+            JsonObject combat=new JsonObject();combat.addProperty("id",target.id());combat.addProperty("level",target.level());
+            float hp=target.health();var entity=player.getServerWorld().getEntityById(target.id());if(entity instanceof CellEntity live)hp=live.health();
+            combat.addProperty("health",Math.max(0,hp));combat.addProperty("damage",target.damage());combat.addProperty("serial",target.serial());state.add("target",combat);
+        }else state.add("target",com.google.gson.JsonNull.INSTANCE);
         state.add("body",SporeCell.GSON.toJsonTree(p.blueprint));state.add("specs",SporeCell.GSON.toJsonTree(Parts.SPECS));
         ServerPlayNetworking.send(player,new CellPackets.State(state.toString()));
     }
     public static void serverTick(MinecraftServer server) {
+        CellReproduction.tick(server);
         CellSave save=CellSave.get(server);
         for(ServerPlayerEntity player:server.getPlayerManager().getPlayerList()) {
             CellSave.Profile p=save.profiles.get(player.getUuid());if(p==null)continue;
@@ -157,7 +177,7 @@ public final class CellGame {
         List<CellEntity> players=ACTIVE.values().stream().filter(e->e.getWorld()==world&&!e.isRemoved()).toList();
         if(players.isEmpty())return;
         List<CellEntity> all=new ArrayList<>();
-        for(var entity:world.iterateEntities())if(entity instanceof CellEntity cell && cell.owner==null)all.add(cell);
+        for(var entity:world.iterateEntities())if(entity instanceof CellEntity cell && cell.owner==null && cell.kind()<CellEntity.MATE)all.add(cell);
         for(CellEntity cell:all)if(players.stream().noneMatch(p->p.squaredDistanceTo(cell)<Math.pow(58*p.size(),2)))cell.discard();
         for(CellEntity player:players) {
             int[] count=new int[7];
@@ -207,6 +227,7 @@ public final class CellGame {
             double t=(e.age+e.getId()*17)*.008;
             e.setPosition(e.getX()+Math.cos(t)*.012*e.size(),e.getY(),e.getZ()+Math.sin(t)*.012*e.size());return;
         }
+        if(e.kind()>=CellEntity.MATE){if(!CellReproduction.owns(e))e.discard();return;}
         if(e.food()||e.kind()==CellEntity.ROCK)return;
         if(e.owner!=null && EDITING.contains(e.owner))return;
         Blueprint.Stats stats=e.blueprint().stats(Parts.SPECS);
@@ -219,7 +240,7 @@ public final class CellGame {
         }
         double length=Math.hypot(x,z);
         if(length>.001) {
-            double target=Math.toDegrees(Math.atan2(x,-z));e.setYaw((float)Motion.steer(e.getYaw(),target,stats.turn()));
+            double target=Math.toDegrees(Math.atan2(x,-z));e.setYaw((float)Motion.steer(e.getYaw(),target,e.owner==null?stats.turn():Math.max(8,stats.turn()*1.5)));
         }
         double angle=Math.toRadians(e.getYaw());
         Vec3d desired=length>.001?new Vec3d(Math.sin(angle),0,-Math.cos(angle)).multiply(stats.speed()*e.size()*Math.min(1,length)):Vec3d.ZERO;
@@ -234,11 +255,13 @@ public final class CellGame {
     private static boolean clear(CellEntity e,double x,double z) {
 
         for(Blueprint.Piece p:e.blueprint().pieces()) {
+            if(p.mounted())continue;
             Vec3d offset=offset(e,p);Box box=new Box(x+offset.x-.29*e.size(),PLANE,z+offset.z-.29*e.size(),x+offset.x+.29*e.size(),PLANE+.45*e.size(),z+offset.z+.29*e.size());
             if(!e.getWorld().isSpaceEmpty(e,box))return false;
         }
-        for(CellEntity other:e.getWorld().getEntitiesByClass(CellEntity.class,e.getBoundingBox().expand(12*e.size()),o->o!=e&&!o.food()&&o.kind()!=CellEntity.BACKGROUND&&!o.isRemoved())) {
+        for(CellEntity other:e.getWorld().getEntitiesByClass(CellEntity.class,e.getBoundingBox().expand(12*e.size()),o->o!=e&&!o.food()&&(!o.scenery()||o.kind()==CellEntity.ROCK)&&!o.isRemoved())) {
             for(Blueprint.Piece p:e.blueprint().pieces())for(Blueprint.Piece q:other.blueprint().pieces()) {
+                if(p.mounted()||q.mounted())continue;
                 Vec3d a=offset(e,p),b=offset(other,q);
                 double dx=x+a.x-other.getX()-b.x,dz=z+a.z-other.getZ()-b.z;
                 double oldX=e.getX()+a.x-other.getX()-b.x,oldZ=e.getZ()+a.z-other.getZ()-b.z;
@@ -250,7 +273,7 @@ public final class CellGame {
     }
     private static Vec3d offset(CellEntity e,Blueprint.Piece p) {
         double a=Math.toRadians(e.getYaw()),c=Math.cos(a),s=Math.sin(a);
-        return new Vec3d((p.x()*c-p.z()*s)*.65*e.size(),0,(p.x()*s+p.z()*c)*.65*e.size());
+        return new Vec3d((p.px()*c-p.pz()*s)*e.size(),p.py()*e.size(),(p.px()*s+p.pz()*c)*e.size());
     }
     private static void think(CellEntity e,Blueprint.Stats stats) {
         List<CellEntity> nearby=e.getWorld().getEntitiesByClass(CellEntity.class,e.getBoundingBox().expand(stats.sight()*e.size()),
@@ -282,7 +305,7 @@ public final class CellGame {
                     }
                 }
                 double dx=target.x-pos.x,dz=target.z-pos.z;
-                if(dx*dx+dz*dz>Math.pow(.72*e.size()+.3*other.size(),2) || !Motion.faces(dx,dz,p.direction(),e.getYaw()))continue;
+                if(Math.abs(Math.cos(Math.toRadians(p.pitch())))<.25 || dx*dx+dz*dz>Math.pow(.72*e.size()*p.size()+.3*other.size(),2) || !Motion.facesAngle(dx,dz,p.angle()+e.getYaw()))continue;
                 if(other.food()) {
                     if((other.kind()==CellEntity.PLANT&&(p.part()==Part.HERBIVORE_MOUTH||p.part()==Part.OMNIVORE_MOUTH))
                             ||(other.kind()==CellEntity.MEAT&&(p.part()==Part.CARNIVORE_MOUTH||p.part()==Part.OMNIVORE_MOUTH))) {
@@ -308,18 +331,27 @@ public final class CellGame {
         p.eaten++;p.health=e.health();e.level(Evolution.level(p.progress));save.markDirty();
         ServerPlayerEntity player=e.getServer().getPlayerManager().getPlayer(e.owner);
         if(player!=null)sync(player,false,p.progress==1000?"Стадия клетки пройдена! Организм готов к следующему этапу.":
-                before<100&&p.progress>=100?"Открыт всеядный рот. Добавьте его в редакторе [G].":
+                before<100&&p.progress>=100?"Открыт всеядный рот. После размножения добавьте его потомку.":
                 Evolution.level(before)!=e.level()?"Рост: уровень "+e.level()+". Клетка увеличилась.":"");
     }
     private static void hit(CellEntity attacker,CellEntity target,float damage) {
-        if(target.hurtCooldown>0)return;
+        if(target.hurtCooldown>0||damage<=0)return;
         target.hurtCooldown=15;target.health(target.health()-damage);
+        if(attacker.owner!=null){
+            TARGETS.put(attacker.owner,new CombatTarget(target.getId(),target.level(),Math.max(0,target.health()),damage,++attackSerial,attacker.getServer().getTicks()+80));
+            var player=attacker.getServer().getPlayerManager().getPlayer(attacker.owner);if(player!=null)sync(player,false,"");
+        }
+        if(target.owner!=null){
+            CellSave save=CellSave.get(target.getServer());save.profile(target.owner).health=Math.max(0,target.health());save.markDirty();
+            var player=target.getServer().getPlayerManager().getPlayer(target.owner);if(player!=null&&target.health()>0)sync(player,false,"Ваша клетка получила урон.");
+        }
         if(target.health()>0)return;
         if(target.owner==null) {
             CellEntity meat=spawn((ServerWorld)target.getWorld(),CellEntity.MEAT,target.getX(),target.getZ(),Blueprint.starter());
             meat.level(target.level());target.discard();
         } else {
             CellSave save=CellSave.get(target.getServer());CellSave.Profile p=save.profile(target.owner);
+            CellReproduction.cancel(target.owner);
             p.deaths++;p.health=(float)p.blueprint.stats(Parts.SPECS).health();target.health(p.health);target.hurtCooldown=80;
             target.setPosition(0,PLANE,0);target.setVelocity(Vec3d.ZERO);save.markDirty();
             ServerPlayerEntity player=target.getServer().getPlayerManager().getPlayer(target.owner);

@@ -1,0 +1,4 @@
+004404e0 set_rigblock_scale_from_editor
+004409e0 apply_rigblock_scale
+0049ebb0 propagate_rigblock_scale
+00582250 editor_mousewheel_scale

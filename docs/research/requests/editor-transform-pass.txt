@@ -1,0 +1,9 @@
+00440670 rigblock_set_scale_candidate
+00440460 rigblock_orientation_candidate
+004498f0 rigblock_transform_update_candidate
+00483ce0 axis_handle_candidate
+00482f30 rotation_ball_handle_candidate
+004a2860 attach_part_to_parent
+005ab860 editor_drag_surface_update
+004af780 serialize_editor_model
+004ae8d0 deserialize_editor_model

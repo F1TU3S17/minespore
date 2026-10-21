@@ -45,6 +45,14 @@ final class PondRenderer {
                     quad(vertices,matrix,px+r-t,py,pz-r,px+r,pz+r,0x407ED7D4);
                 }
             }
+            if(CellClient.mating>=0){
+                double radius=((cell.age%40)/40d)*5*scale;
+                for(int i=0;i<32;i++){
+                    double angle=i*Math.PI/16;
+                    float px=(float)(cell.getX()+Math.cos(angle)*radius),pz=(float)(cell.getZ()+Math.sin(angle)*radius),r=(float)(.055*scale);
+                    quad(vertices,matrix,px-r,(float)cell.getY()+.03f,pz-r,px+r,pz+r,0x90EDAFD7);
+                }
+            }
             matrices.pop();renderedFrames++;
         });
     }

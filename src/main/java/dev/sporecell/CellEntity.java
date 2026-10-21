@@ -8,12 +8,14 @@ import net.minecraft.world.World;
 import java.util.UUID;
 
 public final class CellEntity extends Entity {
-    public static final int PLAYER=0, GRAZER=1, HUNTER=2, PLANT=3, MEAT=4, ROCK=5, BACKGROUND=6;
+    public static final int PLAYER=0, GRAZER=1, HUNTER=2, PLANT=3, MEAT=4, ROCK=5, BACKGROUND=6, MATE=7, EGG=8;
     private static final TrackedData<String> BODY=DataTracker.registerData(CellEntity.class,TrackedDataHandlerRegistry.STRING);
     private static final TrackedData<Integer> KIND=DataTracker.registerData(CellEntity.class,TrackedDataHandlerRegistry.INTEGER);
     private static final TrackedData<Float> HEALTH=DataTracker.registerData(CellEntity.class,TrackedDataHandlerRegistry.FLOAT);
     private static final TrackedData<Integer> LEVEL=DataTracker.registerData(CellEntity.class,TrackedDataHandlerRegistry.INTEGER);
     public UUID owner;
+    public int lastHurtAge=-1000;
+    public float lastDamage,previousClientHealth=6;
     public double inputX,inputZ;
     public int inputAge=100, hurtCooldown;
     public String behavior="wander";
@@ -35,10 +37,17 @@ public final class CellEntity extends Entity {
     public int level() { return dataTracker.get(LEVEL); }
     public void level(int value) { dataTracker.set(LEVEL,Math.clamp(value,0,10)); }
     public void health(float h) { dataTracker.set(HEALTH,h); }
+    @Override public void onTrackedDataSet(TrackedData<?> data){
+        super.onTrackedDataSet(data);
+        if(data.equals(HEALTH)&&getWorld()!=null&&getWorld().isClient){
+            float value=health();if(value<previousClientHealth){lastHurtAge=age;lastDamage=previousClientHealth-value;}
+            previousClientHealth=value;
+        }
+    }
     public boolean food() { return kind()==PLANT||kind()==MEAT; }
-    public boolean scenery() {return kind()==ROCK||kind()==BACKGROUND;}
+    public boolean scenery() {return kind()>=ROCK;}
     public double size() {return CellScale.size(level());}
-    public double radius() {return blueprint().pieces().stream().mapToDouble(p->Math.hypot(p.x(),p.z())+.8).max().orElse(1)*.65*size();}
+    public double radius() {return blueprint().pieces().stream().mapToDouble(p->(Math.hypot(p.px(),p.pz())+p.size())/.65).max().orElse(1)*.65*size();}
     @Override public net.minecraft.util.math.Box getVisibilityBoundingBox() {return getBoundingBox().expand(radius());}
     @Override public void tick() {
         super.tick();

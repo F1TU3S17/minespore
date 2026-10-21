@@ -25,7 +25,7 @@ public final class SporeCell implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(CellPackets.Action.ID,CellPackets.Action.CODEC);
         PayloadTypeRegistry.playS2C().register(CellPackets.State.ID,CellPackets.State.CODEC);
         ServerPlayNetworking.registerGlobalReceiver(CellPackets.Action.ID,(payload,context)-> {
-            if(payload.json().length()>12000) return;
+            if(payload.json().length()>48000) return;
             context.server().execute(()->CellGame.action(context.player(),payload.json()));
         });
         CommandRegistrationCallback.EVENT.register((dispatcher,registry,environment)->dispatcher.register(

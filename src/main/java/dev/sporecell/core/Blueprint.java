@@ -5,7 +5,21 @@ import java.util.*;
 /** Coordinates are local X/Z; direction 0 points north (-Z), then clockwise. */
 public record Blueprint(List<Piece> pieces) {
     public static final int RADIUS = 4;
-    public record Piece(int x, int z, Part part, int direction) {}
+    public record Piece(int x,int z,Part part,int direction,boolean mounted,double dx,double dy,double dz,double rotation,Double scale,double pitch,double roll) {
+        public Piece(int x,int z,Part part,int direction,boolean mounted,double dx,double dy,double dz,double rotation,Double scale){this(x,z,part,direction,mounted,dx,dy,dz,rotation,scale,0,0);}
+        public Piece(int x,int z,Part part,int direction) {this(x,z,part,direction,false,0,0,0,0,1d);}
+        public double size() {return scale==null?1:scale;}
+        public double angle() {return direction*90+rotation;}
+        public double px() {return x*.65+dx;}
+        public double py() {return dy;}
+        public double pz() {return z*.65+dz;}
+        public Piece transform(double angle,double size) {return new Piece(x,z,part,0,mounted,dx,dy,dz,angle,size,pitch,roll);}
+        public Piece orient(double yaw,double pitch,double roll){return new Piece(x,z,part,0,mounted,dx,dy,dz,yaw,size(),pitch,roll);}
+        public Piece mirror() {return new Piece(-x,z,part,0,mounted,-dx,dy,dz,-angle(),size(),pitch,-roll);}
+        public static Piece attachment(int x,int z,Part part,double dx,double dy,double dz,double angle,double scale) {
+            return new Piece(x,z,part,0,true,dx,dy,dz,angle,scale);
+        }
+    }
     public record Stats(int cost, double health, double speed, double turn, double sight, double damage,
                         boolean herbivore, boolean carnivore) {}
 
@@ -19,15 +33,27 @@ public record Blueprint(List<Piece> pieces) {
                         diet==Evolution.Diet.OMNIVORE?Part.OMNIVORE_MOUTH:Part.HERBIVORE_MOUTH, 0), new Piece(0, 1, Part.FLAGELLUM, 2)));
     }
     public void validate() {
-        if (pieces.isEmpty() || pieces.size() > 49) throw new IllegalArgumentException("Допустимо от 1 до 49 деталей");
+        if (pieces.isEmpty() || pieces.size() > 96) throw new IllegalArgumentException("Допустимо от 1 до 96 элементов");
         Map<String, Piece> occupied = new HashMap<>();
         int cores = 0;
         for (Piece p : pieces) {
             if (p.part == null || Math.abs(p.x) > RADIUS || Math.abs(p.z) > RADIUS || p.direction < 0 || p.direction > 3)
                 throw new IllegalArgumentException("Деталь вне сетки или неверный поворот");
+            if(!Double.isFinite(p.dx+p.dy+p.dz+p.rotation+p.size()+p.pitch+p.roll) || p.size()<.5 || p.size()>2
+                    || Math.abs(p.dx)>.55 || Math.abs(p.dz)>.55 || p.dy<-.2 || p.dy>.8 || Math.abs(p.rotation)>3600 || Math.abs(p.pitch)>3600 || Math.abs(p.roll)>3600)
+                throw new IllegalArgumentException("Недопустимое смещение, поворот или масштаб детали");
+            if(p.mounted) {
+                if(p.part==Part.CORE||p.part==Part.BODY||p.part==Part.ARMOR)throw new IllegalArgumentException("Тело строится из связанных кубиков");
+                continue;
+            }
+            if(p.dx!=0||p.dy!=0||p.dz!=0||p.size()!=1||p.rotation!=0||p.pitch!=0||p.roll!=0) {
+                if(p.part==Part.CORE||p.part==Part.BODY||p.part==Part.ARMOR)throw new IllegalArgumentException("Сегменты тела закреплены на сетке");
+            }
             if (occupied.put(key(p.x, p.z), p) != null) throw new IllegalArgumentException("Детали пересекаются");
             if (p.part == Part.CORE) { cores++; if (p.x != 0 || p.z != 0) throw new IllegalArgumentException("Ядро должно быть в центре"); }
         }
+        if(occupied.size()>49)throw new IllegalArgumentException("Не более 49 сегментов тела");
+        for(Piece p:pieces)if(p.mounted&&!occupied.containsKey(key(p.x,p.z)))throw new IllegalArgumentException("Деталь должна крепиться к телу");
         if (cores != 1) throw new IllegalArgumentException("Нужно одно ядро в центре");
         Set<String> visited = new HashSet<>();
         ArrayDeque<Piece> queue = new ArrayDeque<>(); queue.add(occupied.get(key(0,0)));
@@ -38,7 +64,7 @@ public record Blueprint(List<Piece> pieces) {
                 if (next != null && !visited.contains(key(next.x,next.z))) queue.add(next);
             }
         }
-        if (visited.size() != pieces.size()) throw new IllegalArgumentException("Все детали должны соединяться с ядром");
+        if (visited.size() != occupied.size()) throw new IllegalArgumentException("Все детали должны соединяться с ядром");
     }
     private static String key(int x,int z) { return x + ":" + z; }
     public Stats stats(Map<Part, PartSpec> specs) {
@@ -47,7 +73,7 @@ public record Blueprint(List<Piece> pieces) {
         for (Piece p : pieces) {
             PartSpec s = Objects.requireNonNull(specs.get(p.part)); cost += s.cost(); hp += s.health();
             // Forward/rear mounting supplies propulsion; side mounting gives less thrust.
-            double alignment = (p.direction % 2 == 0) ? 1 : .55;
+            double alignment = .55+.45*Math.abs(Math.cos(Math.toRadians(p.angle())));
             thrust += s.thrust() * alignment;
             turn += s.turn() * (1 + Math.abs(p.x) * .15);
             sight += s.sight(); damage = Math.max(damage,s.damage());

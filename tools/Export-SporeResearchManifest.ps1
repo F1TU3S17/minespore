@@ -1,5 +1,5 @@
 param(
-    [string[]]$EvidenceNames=@('cell-selected','cell-region','editor-first-pass','editor-model-pass','editor-core-pass','editor-region','editor-drag-pass','editor-drag-methods','editor-attachment-pass','editor-focus-pass','cell-typed-pass','editor-message-pass'),
+    [string[]]$EvidenceNames=@('cell-selected','cell-region','editor-first-pass','editor-model-pass','editor-core-pass','editor-region','editor-drag-pass','editor-drag-methods','editor-attachment-pass','editor-focus-pass','cell-typed-pass','editor-message-pass','editor-transform-pass','editor-transform-resolved','editor-scale-verified','editor-pose-mating-pass','editor-pose-typed'),
     [string]$ManifestName='editor-cell-manifest.csv'
 )
 $ErrorActionPreference='Stop'

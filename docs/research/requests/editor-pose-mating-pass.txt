@@ -1,0 +1,4 @@
+004409b0 set_rigblock_orientation
+0044a5b0 set_rigblock_position
+004408e0 set_rigblock_scale_entry
+00e63bf0 mating_call_effect_dispatch
